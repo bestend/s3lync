@@ -2,12 +2,12 @@
 Tests for hash and utility functions.
 """
 
-import pytest
 import os
-import tempfile
 
-from s3lync.hash import calculate_file_hash, verify_hash, get_file_size
-from s3lync.utils import parse_s3_uri, normalize_path, ensure_parent_dir
+import pytest
+
+from s3lync.hash import calculate_file_hash, get_file_size, verify_hash
+from s3lync.utils import ensure_parent_dir, normalize_path, parse_s3_uri
 
 
 class TestHashFunctions:
@@ -62,9 +62,58 @@ class TestUtilityFunctions:
 
     def test_parse_s3_uri_valid(self):
         """Test valid S3 URI parsing."""
-        bucket, key = parse_s3_uri("s3://my-bucket/path/to/file.txt")
+        bucket, key, access_key, secret_key, endpoint = parse_s3_uri(
+            "s3://my-bucket/path/to/file.txt"
+        )
         assert bucket == "my-bucket"
         assert key == "path/to/file.txt"
+        assert access_key is None
+        assert secret_key is None
+        assert endpoint is None
+
+    def test_parse_s3_uri_with_endpoint(self):
+        """Test S3 URI parsing with endpoint only."""
+        bucket, key, access_key, secret_key, endpoint = parse_s3_uri(
+            "s3://minio.example.com@my-bucket/path/to/file.txt"
+        )
+        assert bucket == "my-bucket"
+        assert key == "path/to/file.txt"
+        assert access_key is None
+        assert secret_key is None
+        assert endpoint == "minio.example.com"
+
+    def test_parse_s3_uri_with_endpoint_and_credentials(self):
+        """Test S3 URI parsing with endpoint and credentials."""
+        bucket, key, access_key, secret_key, endpoint = parse_s3_uri(
+            "s3://mysecret:myaccess@minio.example.com/my-bucket/path/to/file.txt"
+        )
+        assert bucket == "my-bucket"
+        assert key == "path/to/file.txt"
+        assert access_key == "myaccess"
+        assert secret_key == "mysecret"
+        assert endpoint == "minio.example.com"
+
+    def test_parse_s3_uri_with_https_endpoint(self):
+        """Test S3 URI parsing with https endpoint and credentials."""
+        bucket, key, access_key, secret_key, endpoint = parse_s3_uri(
+            "s3://mysecret:myaccess@https://minio.example.com/my-bucket/path/to/file.txt"
+        )
+        assert bucket == "my-bucket"
+        assert key == "path/to/file.txt"
+        assert access_key == "myaccess"
+        assert secret_key == "mysecret"
+        assert endpoint == "https://minio.example.com"
+
+    def test_parse_s3_uri_with_http_endpoint(self):
+        """Test S3 URI parsing with http endpoint and credentials."""
+        bucket, key, access_key, secret_key, endpoint = parse_s3_uri(
+            "s3://mysecret:myaccess@http://minio.example.com/my-bucket/path/to/file.txt"
+        )
+        assert bucket == "my-bucket"
+        assert key == "path/to/file.txt"
+        assert access_key == "myaccess"
+        assert secret_key == "mysecret"
+        assert endpoint == "http://minio.example.com"
 
     def test_parse_s3_uri_invalid_format(self):
         """Test invalid S3 URI format."""
@@ -88,4 +137,3 @@ class TestUtilityFunctions:
         file_path = os.path.join(temp_dir, "subdir", "file.txt")
         ensure_parent_dir(file_path)
         assert os.path.exists(os.path.dirname(file_path))
-

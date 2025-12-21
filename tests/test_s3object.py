@@ -2,13 +2,13 @@
 Tests for S3Object core functionality.
 """
 
-import pytest
 import os
-import tempfile
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch
+
+import pytest
 
 from s3lync.core import S3Object
-from s3lync.exceptions import S3ObjectError, HashMismatchError, SyncError
+from s3lync.exceptions import S3ObjectError
 from s3lync.hash import calculate_file_hash
 
 
@@ -56,8 +56,7 @@ class TestS3ObjectDownload:
             obj = S3Object("s3://bucket/file.txt", local_path=local_path)
             obj._client = mock_client
 
-
-            obj.download(check_hash=False)
+            obj.download(use_checksum=False)
 
             mock_client.download_file.assert_called_once()
 
@@ -79,10 +78,10 @@ class TestS3ObjectDownload:
             obj._client = mock_client
 
             # Should not raise
-            obj.download(check_hash=True)
+            obj.download(use_checksum=True)
 
     def test_download_force_sync(self, temp_dir):
-        """Test download with force_sync=True."""
+        """Test download with mirror=True."""
         local_path = os.path.join(temp_dir, "test.txt")
 
         with open(local_path, "w") as f:
@@ -95,7 +94,7 @@ class TestS3ObjectDownload:
             obj = S3Object("s3://bucket/file.txt", local_path=local_path)
             obj._client = mock_client
 
-            obj.download(force_sync=True, check_hash=False)
+            obj.download(mirror=True, use_checksum=False)
 
             # Should be called even if local file exists
             mock_client.download_file.assert_called_once()
@@ -143,7 +142,9 @@ class TestS3ObjectContextManager:
         with patch("s3lync.core.S3Client") as MockClient:
             mock_client = MockClient.return_value
             mock_client.is_file.return_value = True
-            mock_client.download_file.return_value = {"ETag": '"9473fdd0d880a43c21b7778d34872157"'}
+            mock_client.download_file.return_value = {
+                "ETag": '"9473fdd0d880a43c21b7778d34872157"'
+            }
 
             obj = S3Object("s3://bucket/file.txt", local_path=local_path)
             obj._client = mock_client
@@ -173,4 +174,3 @@ class TestS3ObjectContextManager:
             # Verify local file was written
             with open(local_path, "r") as f:
                 assert f.read() == "new content"
-

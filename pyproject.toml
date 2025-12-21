@@ -25,6 +25,11 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Software Development :: Libraries",
 ]
+dependencies = [
+    "boto3>=1.26.0",
+    "botocore>=1.29.0",
+    "tqdm>=4.60.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/bestend/s3lync"
@@ -33,17 +38,12 @@ Repository = "https://github.com/bestend/s3lync.git"
 Issues = "https://github.com/bestend/s3lync/issues"
 Changelog = "https://github.com/bestend/s3lync/blob/main/CHANGELOG.md"
 
-dependencies = [
-    "boto3>=1.26.0",
-    "botocore>=1.29.0",
-]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-mock>=3.0",
-    "black>=23.0",
     "ruff>=0.0.250",
     "mypy>=1.0",
 ]
@@ -54,28 +54,10 @@ packages = ["s3lync"]
 [tool.setuptools.package-dir]
 "" = "src"
 
-[tool.black]
-line-length = 88
-target-version = ["py39", "py310", "py311", "py312"]
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
-
 [tool.ruff]
 line-length = 88
 target-version = "py39"
-select = [
+lint.select = [
     "E",    # pycodestyle errors
     "W",    # pycodestyle warnings
     "F",    # pyflakes
@@ -83,10 +65,17 @@ select = [
     "C",    # flake8-comprehensions
     "B",    # flake8-bugbear
 ]
-ignore = [
-    "E501",  # line too long, handled by black
+lint.ignore = [
+    "E501",  # line too long, handled by ruff format
     "B008",  # do not perform function calls in argument defaults
+    "C901",  # function is too complex, we accept this for now
 ]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
 
 [tool.mypy]
 python_version = "3.9"

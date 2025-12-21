@@ -25,4 +25,3 @@ class S3ObjectError(S3lyncError):
     """Raised for S3Object specific errors."""
 
     pass
-

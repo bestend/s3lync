@@ -30,16 +30,16 @@ jobs:
       run: ruff check src/ tests/
       continue-on-error: true
 
+    - name: Format check with ruff
+      run: ruff format --check src/ tests/
+      continue-on-error: true
+
     - name: Type check with mypy
       run: mypy src/
       continue-on-error: true
 
-    - name: Format check with black
-      run: black --check src/ tests/
-      continue-on-error: true
-
     - name: Run tests
-      run: pytest tests/ --cov=src/s3lync --cov-report=xml
+      run: pytest tests/ -v --cov=s3lync --cov-report=xml
 
     - name: Upload coverage
       uses: codecov/codecov-action@v3

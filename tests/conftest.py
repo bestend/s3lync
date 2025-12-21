@@ -2,10 +2,10 @@
 Pytest configuration.
 """
 
-import pytest
-import tempfile
 import os
-from pathlib import Path
+import tempfile
+
+import pytest
 
 
 @pytest.fixture
@@ -24,4 +24,3 @@ def temp_file():
     yield temp_path
     if os.path.exists(temp_path):
         os.unlink(temp_path)
-

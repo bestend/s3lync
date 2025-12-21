@@ -26,9 +26,7 @@ def calculate_file_hash(file_path: str, algorithm: str = "md5") -> str:
     return hash_obj.hexdigest()
 
 
-def verify_hash(
-    file_path: str, expected_hash: str, algorithm: str = "md5"
-) -> bool:
+def verify_hash(file_path: str, expected_hash: str, algorithm: str = "md5") -> bool:
     """
     Verify if a file matches the expected hash.
 
@@ -56,8 +54,8 @@ def get_s3_etag(s3_response: dict) -> str:
     Returns:
         Clean ETag value (without quotes)
     """
-    etag = s3_response.get("ETag", "").strip('"')
-    return etag
+    etag: str = s3_response.get("ETag", "")
+    return etag.strip('"')
 
 
 def get_file_size(file_path: str) -> int:
@@ -71,4 +69,3 @@ def get_file_size(file_path: str) -> int:
         File size in bytes
     """
     return os.path.getsize(file_path)
-

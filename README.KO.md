@@ -63,14 +63,6 @@ s3lync는 **개발자 경험(DX)**에 집중합니다.
 pip install s3lync
 ````
 
-### 개발 환경 설치
-
-```bash
-git clone https://github.com/bestend/s3lync.git
-cd s3lync
-pip install -e ".[dev]"
-```
-
 ---
 
 ## 빠른 시작
@@ -80,21 +72,26 @@ pip install -e ".[dev]"
 ```python
 from s3lync import S3Object
 
-obj = S3Object("s3://my-bucket/path/to/file.txt")
+# S3 객체 참조 생성
+obj = S3Object('s3://my-bucket/path/to/file.txt')
 
+# S3에서 로컬로 다운로드
 obj.download()
+
+# 로컬에서 S3로 업로드
 obj.upload()
 ```
 
-### Context Manager 사용 (권장)
+### Context Manager
 
 ```python
-# 읽기 시 자동 다운로드, 쓰기 시 자동 업로드
-with obj.open("r") as f:
-    data = f.read()
+# 읽기 모드: S3에서 자동으로 다운로드
+with obj.open('r') as f:
+    content = f.read()
 
-with obj.open("w") as f:
-    f.write("new content")
+# 쓰기 모드: 자동으로 S3에 업로드
+with obj.open('w') as f:
+    f.write('새로운 내용')
 ```
 
 ---
@@ -113,8 +110,13 @@ s3://secret:access@https://endpoint/bucket/key
 예시:
 
 ```python
+# 기본 URI (환경변수에서 자격증명 사용)
 S3Object("s3://my-bucket/data.json")
+
+# 커스텀 S3-compatible endpoint
 S3Object("s3://minio.example.com@my-bucket/data.json")
+
+# 자격증명과 HTTPS endpoint 포함
 S3Object("s3://key:secret@https://minio.example.com/my-bucket/data.json")
 ```
 
@@ -125,7 +127,10 @@ S3Object("s3://key:secret@https://minio.example.com/my-bucket/data.json")
 ### 다운로드 / 업로드
 
 ```python
+# 기본 다운로드
 obj.download()
+
+# 강제 동기화: 원격을 로컬과 동일하게 만들기 (필요시 파일 삭제)
 obj.upload(mirror=True)
 ```
 
@@ -135,7 +140,10 @@ obj.upload(mirror=True)
 Python 캐시(`__pycache__`, `.egg-info`)는 업로드에서 제외됩니다.
 
 ```python
+# .tmp와 node_modules 파일 제외
 obj.upload(excludes=[r".*\.tmp$", r"node_modules"])
+
+# 추가 제외 패턴 추가
 obj.add_exclude(r".*\.log$")
 ```
 
@@ -192,20 +200,20 @@ export S3LYNC_PROGRESS_MODE=disabled
 ```python
 from s3lync import Config
 
-# 런타임에서 설정(환경 변수가 있으면 그 값이 우선)
-Config.set_debug_enabled(True)            # 또는 False
-Config.set_log_level("WARNING")          # DEBUG | INFO | WARNING | ERROR | CRITICAL
-Config.set_progress_mode("compact")      # progress | compact | disabled
+# 런타임에 설정 (환경 변수가 있으면 그 값이 우선)
+Config.set_debug_enabled(True)            # 디버그 모드 활성화
+Config.set_log_level("WARNING")          # 로그 레벨 설정
+Config.set_progress_mode("compact")      # 진행 표시 모드 변경
 Config.set_exclude_hidden(False)          # 숨김 파일 포함
-Config.set_aws_region("ap-northeast-2")
+Config.set_region("ap-northeast-2")      # AWS 리전 설정
 
-# 값 조회
-region = Config.get_aws_region()
+# 설정값 읽기
+region = Config.get_region()
 debug = Config.is_debug_enabled()
 mode = Config.get_progress_mode()
 exclude_hidden = Config.should_exclude_hidden()
 
-# 오버라이드 초기화(테스트에 유용)
+# 런타임 설정 초기화 (테스트에 유용)
 Config.reset_runtime_overrides()
 ```
 
@@ -229,12 +237,12 @@ s3lync는 boto3의 표준 자격증명 체인을 사용합니다. 별도의 키 
 사용 예:
 
 ```bash
-# 환경 변수 사용
+# 환경 변수를 통한 자격증명 설정
 export AWS_ACCESS_KEY_ID=AKIA...
 export AWS_SECRET_ACCESS_KEY=...
 export AWS_DEFAULT_REGION=ap-northeast-2
 
-# 또는 로컬 ~/.aws/credentials의 프로필 사용
+# 또는 ~/.aws/credentials의 프로필 선택
 export AWS_PROFILE=my-profile
 ```
 
@@ -246,10 +254,13 @@ export AWS_PROFILE=my-profile
 from s3lync import S3Object, HashMismatchError, SyncError
 
 try:
+    # S3에서 파일 다운로드
     S3Object("s3://bucket/file.txt").download()
 except HashMismatchError:
+    # 파일 무결성 검증 실패
     print("파일 무결성 검증 실패")
 except SyncError:
+    # 동기화 오류 발생
     print("동기화 오류 발생")
 ```
 
@@ -261,14 +272,6 @@ except SyncError:
 
 ```bash
 pytest tests/
-```
-
-### 코드 품질
-
-```bash
-ruff format src/ tests/
-ruff check src/ tests/
-mypy src/
 ```
 
 ---

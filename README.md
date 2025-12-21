@@ -62,14 +62,6 @@ s3lync focuses on **developer experience**.
 pip install s3lync
 ```
 
-### Development Install
-
-```bash
-git clone https://github.com/bestend/s3lync.git
-cd s3lync
-pip install -e ".[dev]"
-```
-
 ---
 
 ## Quick Start
@@ -79,19 +71,24 @@ pip install -e ".[dev]"
 ```python
 from s3lync import S3Object
 
+# Create S3 object reference
 obj = S3Object("s3://my-bucket/path/to/file.txt")
 
+# Download from S3
 obj.download()
+
+# Upload to S3
 obj.upload()
 ```
 
 ### Context Manager (Recommended)
 
 ```python
-# Auto-download on read, auto-upload on write
+# Read mode: auto-download from S3
 with obj.open("r") as f:
     data = f.read()
 
+# Write mode: auto-upload to S3
 with obj.open("w") as f:
     f.write("new content")
 ```
@@ -112,8 +109,13 @@ s3://secret:access@https://endpoint/bucket/key
 Examples:
 
 ```python
+# Basic URI (credentials from environment variables)
 S3Object("s3://my-bucket/data.json")
+
+# Custom S3-compatible endpoint
 S3Object("s3://minio.example.com@my-bucket/data.json")
+
+# With credentials and HTTPS endpoint
 S3Object("s3://key:secret@https://minio.example.com/my-bucket/data.json")
 ```
 
@@ -124,7 +126,10 @@ S3Object("s3://key:secret@https://minio.example.com/my-bucket/data.json")
 ### Download / Upload
 
 ```python
+# Basic download
 obj.download()
+
+# Force sync: make remote identical to local (delete extra remote files if needed)
 obj.upload(mirror=True)
 ```
 
@@ -133,7 +138,10 @@ obj.upload(mirror=True)
 Hidden files and Python cache are excluded by default.
 
 ```python
+# Exclude specific patterns (.tmp, node_modules)
 obj.upload(excludes=[r".*\.tmp$", r"node_modules"])
+
+# Add additional exclude patterns
 obj.add_exclude(r".*\.log$")
 ```
 
@@ -185,25 +193,25 @@ export S3LYNC_LOG_LEVEL=DEBUG
 export S3LYNC_PROGRESS_MODE=disabled
 ```
 
-### Programmatic configuration (from s3lync import Config)
+### Programmatic Configuration
 
 ```python
 from s3lync import Config
 
-# Set at runtime (env vars still have higher priority)
-Config.set_debug_enabled(True)           # or False
-Config.set_log_level("WARNING")         # DEBUG | INFO | WARNING | ERROR | CRITICAL
-Config.set_progress_mode("compact")     # progress | compact | disabled
-Config.set_exclude_hidden(False)         # include hidden files
-Config.set_aws_region("ap-northeast-2")
+# Set at runtime (environment variables have higher priority)
+Config.set_debug_enabled(True)           # Enable debug mode
+Config.set_log_level("WARNING")          # Set log level
+Config.set_progress_mode("compact")      # Change progress display mode
+Config.set_exclude_hidden(False)          # Include hidden files
+Config.set_region("ap-northeast-2")      # Set AWS region
 
 # Read values
-region = Config.get_aws_region()
+region = Config.get_region()
 debug = Config.is_debug_enabled()
 mode = Config.get_progress_mode()
 exclude_hidden = Config.should_exclude_hidden()
 
-# Reset overrides (useful for tests)
+# Reset runtime overrides (useful for tests)
 Config.reset_runtime_overrides()
 ```
 
@@ -227,12 +235,12 @@ Notes:
 Quick examples:
 
 ```bash
-# Using environment variables
+# Set credentials via environment variables
 export AWS_ACCESS_KEY_ID=AKIA...
 export AWS_SECRET_ACCESS_KEY=...
 export AWS_DEFAULT_REGION=ap-northeast-2
 
-# Or use a profile in ~/.aws/credentials and select it
+# Or use a profile from ~/.aws/credentials
 export AWS_PROFILE=my-profile
 ```
 
@@ -244,29 +252,14 @@ export AWS_PROFILE=my-profile
 from s3lync import S3Object, HashMismatchError, SyncError
 
 try:
+    # Download file from S3
     S3Object("s3://bucket/file.txt").download()
 except HashMismatchError:
+    # File integrity check failed
     print("Integrity check failed")
 except SyncError:
+    # Sync error occurred
     print("Sync error")
-```
-
----
-
-## Development
-
-### Tests
-
-```bash
-pytest tests/
-```
-
-### Quality
-
-```bash
-ruff format src/ tests/
-ruff check src/ tests/
-mypy src/
 ```
 
 ---

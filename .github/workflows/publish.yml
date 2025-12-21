@@ -1,0 +1,76 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - v*
+      - '[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+
+    - name: Extract version
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/}
+        VERSION=${VERSION#v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Build distribution
+      run: python -m build
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+
+    - name: Create Release Notes
+      id: release_notes
+      run: |
+        cat > RELEASE_NOTES.md << 'EOF'
+        ## 🎉 s3lync v${{ steps.version.outputs.version }}
+
+        **The Pythonic Bridge Between S3 and the Local Filesystem**
+
+        **Installation:**
+        ```bash
+        pip install s3lync
+        ```
+
+        **What's Changed:**
+        See [CHANGELOG.md](https://github.com/bestend/s3lync/blob/main/CHANGELOG.md) for details.
+
+        **Documentation:**
+        - [README](https://github.com/bestend/s3lync/blob/main/README.md) - English
+        - [README.KO](https://github.com/bestend/s3lync/blob/main/README.KO.md) - 한국어
+        - [Development Guide](https://github.com/bestend/s3lync/blob/main/DEVELOPMENTS.md)
+
+        **Happy syncing! 📦**
+        EOF
+        cat RELEASE_NOTES.md
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/*
+        body_path: RELEASE_NOTES.md
+        draft: false
+        prerelease: false
+        token: ${{ secrets.GITHUB_TOKEN }}
+

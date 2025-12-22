@@ -41,7 +41,7 @@ s3lync focuses on **developer experience**.
 
 * You open a file → it syncs
 * You write to a file → it uploads
-* You don’t think about S3 until you need to
+* You don't think about S3 until you need to
 
 ---
 
@@ -51,7 +51,6 @@ s3lync focuses on **developer experience**.
 * 🔄 **Automatic Sync** — Download & upload with change detection
 * ✅ **Hash Verification** — MD5-based integrity checks
 * 💾 **Smart Caching** — Local cache with intelligent invalidation
-* 🎯 **Context Manager Support** — `with open(...)`
 * 🔒 **Force Sync Mode** — Make local and remote identical
 
 ---
@@ -81,16 +80,24 @@ obj.download()
 obj.upload()
 ```
 
-### Context Manager (Recommended)
+### With boto3 Client (Recommended)
 
 ```python
-# Read mode: auto-download from S3
-with obj.open("r") as f:
-    data = f.read()
+from s3lync import S3Object
+import boto3
 
-# Write mode: auto-upload to S3
-with obj.open("w") as f:
-    f.write("new content")
+# Create boto3 session and client
+session = boto3.Session(profile_name="dev")
+s3_client = session.client("s3")
+
+# Create S3Object with client
+obj = S3Object(
+    "s3://bucket/key",
+    local_path="./local",
+    boto3_client=s3_client,
+)
+
+obj.upload()
 ```
 
 ---
@@ -102,8 +109,8 @@ s3lync supports multiple URI styles:
 ```text
 s3://bucket/key
 s3://endpoint@bucket/key
-s3://secret:access@endpoint/bucket/key
-s3://secret:access@https://endpoint/bucket/key
+s3://secret_key:access_key@endpoint/bucket/key
+s3://secret_key:access_key@https://endpoint/bucket/key
 ```
 
 Examples:
@@ -116,39 +123,7 @@ S3Object("s3://my-bucket/data.json")
 S3Object("s3://minio.example.com@my-bucket/data.json")
 
 # With credentials and HTTPS endpoint
-S3Object("s3://key:secret@https://minio.example.com/my-bucket/data.json")
-```
-
----
-
-## Common Operations
-
-### Download / Upload
-
-```python
-# Basic download
-obj.download()
-
-# Force sync: make remote identical to local (delete extra remote files if needed)
-obj.upload(mirror=True)
-```
-
-### Exclude Patterns
-
-Hidden files and Python cache are excluded by default.
-
-```python
-# Exclude specific patterns (.tmp, node_modules)
-obj.upload(excludes=[r".*\.tmp$", r"node_modules"])
-
-# Add additional exclude patterns
-obj.add_exclude(r".*\.log$")
-```
-
-Disable hidden-file exclusion:
-
-```bash
-export S3LYNC_EXCLUDE_HIDDEN=0
+S3Object("s3://mysecret:mykey@https://minio.example.com/my-bucket/data.json")
 ```
 
 ---
@@ -169,99 +144,195 @@ export S3LYNC_EXCLUDE_HIDDEN=0
 
 ---
 
-## Configuration
+## Common Operations
 
-Configuration can be set via:
-
-1. Environment variables (highest priority)
-2. Programmatic overrides
-3. Library defaults
-
-### Common Settings
-
-| Setting        | Env Var                 | Default    |
-| -------------- | ----------------------- | ---------- |
-| Log level      | `S3LYNC_LOG_LEVEL`      | `INFO`     |
-| Progress mode  | `S3LYNC_PROGRESS_MODE`  | `progress` |
-| Exclude hidden | `S3LYNC_EXCLUDE_HIDDEN` | `True`     |
-| AWS region     | `AWS_REGION`            | auto       |
-
-Example:
-
-```bash
-export S3LYNC_LOG_LEVEL=DEBUG
-export S3LYNC_PROGRESS_MODE=disabled
-```
-
-### Programmatic Configuration
+### Basic Download / Upload
 
 ```python
-from s3lync import Config
+# Basic download
+obj.download()
 
-# Set at runtime (environment variables have higher priority)
-Config.set_debug_enabled(True)           # Enable debug mode
-Config.set_log_level("WARNING")          # Set log level
-Config.set_progress_mode("compact")      # Change progress display mode
-Config.set_exclude_hidden(False)          # Include hidden files
-Config.set_region("ap-northeast-2")      # Set AWS region
+# Force sync: make remote identical to local (delete extra remote files if needed)
+obj.upload(mirror=True)
+```
 
-# Read values
-region = Config.get_region()
-debug = Config.is_debug_enabled()
-mode = Config.get_progress_mode()
-exclude_hidden = Config.should_exclude_hidden()
+### Directory Synchronization
 
-# Reset runtime overrides (useful for tests)
-Config.reset_runtime_overrides()
+s3lync supports recursive directory download and upload with smart change detection.
+
+```python
+# Download entire directory
+obj = S3Object("s3://bucket/path/to/dir")
+obj.download()
+
+# Upload entire directory (excludes hidden files by default)
+obj.upload()
+
+# Mirror mode: delete files not present in source
+obj.download(mirror=True)  # Deletes local files not in S3
+obj.upload(mirror=True)    # Deletes remote files not in local
+```
+
+### Exclude Patterns
+
+Control which files to include/exclude during sync operations using regex patterns.
+
+#### Default Exclusions
+
+- `/.*/` — Hidden files and directories (`.git`, `.venv`, etc)
+- `__pycache__` — Python cache directories
+- `.egg-info` — Python package metadata
+
+#### How Excludes Work
+
+**Object creation** — replaces all defaults:
+
+```python
+obj = S3Object(
+    "s3://bucket/path",
+    excludes=[r".*\.tmp$", r"\.git/.*"]
+)
+obj.upload()  # Uses ONLY: [.*\.tmp$, \.git/.*]
+```
+
+**Method call** — adds to defaults:
+
+```python
+obj = S3Object("s3://bucket/path")
+obj.upload(excludes=[r".*\.tmp$"])
+# Uses: [/.*/,  __pycache__, .egg-info, .*\.tmp$]
+
+obj.download(excludes=[r"node_modules/.*"])
+# Uses: [/.*/,  __pycache__, .egg-info, node_modules/.*]
 ```
 
 ---
 
 ## AWS Credentials
 
-s3lync uses boto3’s standard credential provider chain. You don’t need to pass keys to s3lync explicitly.
+s3lync uses boto3's standard credential provider chain. 
 
-Search order (simplified):
+### Profile Selection
 
-1. Environment variables
-   - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (and optional `AWS_SESSION_TOKEN`)
-2. AWS credentials file
-   - `~/.aws/credentials` (respects `AWS_PROFILE`)
+boto3 supports **3 ways** to choose AWS profile. In production, explicit 
+selection or environment variables are most common:
 
-Notes:
-- If `AWS_PROFILE` is set, boto3 will use that profile from your local AWS config.
-- On AWS environments (EC2/ECS), instance/role credentials will be discovered automatically if env/files are not set.
+#### ✅ 1. Session with profile (Recommended)
 
-Quick examples:
+```python
+import boto3
+
+session = boto3.Session(profile_name="dev")
+s3_client = session.client("s3")
+
+obj = S3Object("s3://bucket/key", boto3_client=s3_client)
+```
+
+**Advantages:**
+- Explicit in code
+- Works for multi-account scenarios
+- Most flexible
+
+#### ✅ 2. Environment Variable
 
 ```bash
-# Set credentials via environment variables
+export AWS_PROFILE=dev
+```
+
+```python
+import boto3
+
+session = boto3.Session()  # Auto-uses AWS_PROFILE
+s3_client = session.client("s3")
+```
+
+**Advantages:**
+- Environment-specific configuration
+- CI/CD friendly
+- No code changes
+
+#### ⚠️ 3. Default Profile (Implicit)
+
+```python
+import boto3
+
+session = boto3.Session()  # Uses [default] profile
+s3_client = session.client("s3")
+```
+
+### Credentials Search Order
+
+1. Environment variables: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+2. AWS credentials file: `~/.aws/credentials` (respects `AWS_PROFILE`)
+3. AWS config file: `~/.aws/config`
+4. IAM Role (EC2, EKS, ECS environments)
+
+### Quick Examples
+
+```bash
+# Using environment variables
 export AWS_ACCESS_KEY_ID=AKIA...
 export AWS_SECRET_ACCESS_KEY=...
 export AWS_DEFAULT_REGION=ap-northeast-2
 
-# Or use a profile from ~/.aws/credentials
+# Or using a profile
 export AWS_PROFILE=my-profile
 ```
 
 ---
 
-## Error Handling
+## Additional Features
+
+### Custom Callbacks
+
+Chain custom callbacks with progress tracking:
 
 ```python
-from s3lync import S3Object, HashMismatchError, SyncError
+from s3lync import S3Object, chain_callbacks
 
-try:
-    # Download file from S3
-    S3Object("s3://bucket/file.txt").download()
-except HashMismatchError:
-    # File integrity check failed
-    print("Integrity check failed")
-except SyncError:
-    # Sync error occurred
-    print("Sync error")
+def my_callback(bytes_transferred: int):
+    print(f"Transferred: {bytes_transferred} bytes")
+
+obj = S3Object("s3://bucket/large-file.bin", local_path="/tmp/file.bin")
+
+# Use custom callback during download
+metadata = obj._client.download_file(
+    bucket="bucket",
+    key="large-file.bin",
+    local_path="/tmp/file.bin",
+    callback=my_callback,
+    show_progress=True
+)
 ```
 
+### Progress Display Control
+
+Control progress bar display mode:
+
+```python
+from s3lync import S3Object
+import boto3
+
+# Option 1: Set default progress mode when creating object
+obj = S3Object(
+    "s3://bucket/key",
+    local_path="./local",
+    progress_mode="compact"  # "progress" (default), "compact", or "disabled"
+)
+obj.upload()
+
+# Option 2: Override for specific operation
+obj.download(progress_mode="disabled")
+
+# Option 3: With boto3 client
+session = boto3.Session(profile_name="dev")
+s3_client = session.client("s3")
+obj = S3Object(
+    "s3://bucket/key",
+    boto3_client=s3_client,
+    progress_mode="compact"
+)
+```
 ---
 
 ## License
@@ -274,3 +345,4 @@ MIT License — see [LICENSE](./LICENSE)
 
 **JunSeok Kim**
 Built with ❤️ to make S3 feel local
+

@@ -2,65 +2,70 @@
 S3 client wrapper using boto3.
 """
 
-from typing import Optional
+from typing import Any, Callable, Optional
 
 try:
     import boto3
-    from botocore.config import Config
+    from boto3.s3.transfer import TransferConfig
     from botocore.exceptions import ClientError
 except ImportError as e:
     raise ImportError("boto3 is required. Install it with: pip install boto3") from e
 
 from .exceptions import S3lyncError
-from .progress import create_progress_callback
+from .progress import chain_callbacks, create_progress_callback
 
 
 class S3Client:
-    """Wrapper around boto3 S3 client."""
+    """Wrapper around boto3 S3 client - accepts pre-configured boto3 client."""
 
     def __init__(
         self,
+        client: Optional[Any] = None,
         region_name: Optional[str] = None,
-        access_key: Optional[str] = None,
-        secret_key: Optional[str] = None,
         endpoint_url: Optional[str] = None,
     ):
         """
         Initialize S3Client.
 
         Args:
-            region_name: AWS region name (optional, defaults to default AWS config)
-            access_key: AWS access key (optional, defaults to environment variables)
-            secret_key: AWS secret key (optional, defaults to environment variables)
-            endpoint_url: Custom S3 endpoint URL (optional, for S3-compatible services)
+            client: Pre-configured boto3 S3 client (recommended)
+                   If provided, region_name and endpoint_url are ignored
+            region_name: AWS region name (only used if client is None)
+            endpoint_url: Custom S3 endpoint URL (only used if client is None)
         """
-        config = Config(retries={"max_attempts": 3, "mode": "adaptive"})
+        if client is not None:
+            # Use the provided boto3 client directly
+            self.client = client
+            self.resource = None
+        else:
+            # Fallback: create a basic client
+            session = boto3.Session(region_name=region_name)
+            self.client = session.client("s3", endpoint_url=endpoint_url)
+            self.resource = session.resource("s3", endpoint_url=endpoint_url)
 
-        # Build client kwargs
-        client_kwargs = {
-            "region_name": region_name,
-            "config": config,
-        }
+        # Build transfer config from environment or defaults
+        self.transfer_config = self._build_transfer_config()
 
-        if access_key:
-            client_kwargs["aws_access_key_id"] = access_key
-        if secret_key:
-            client_kwargs["aws_secret_access_key"] = secret_key
-        if endpoint_url:
-            client_kwargs["endpoint_url"] = endpoint_url
+    def _build_transfer_config(self) -> Optional[TransferConfig]:
+        """
+        Build transfer config from environment or defaults.
 
-        self.client = boto3.client("s3", **client_kwargs)
+        Returns:
+            TransferConfig object or None
+        """
+        return None  # Use boto3 defaults
 
     def download_file(
         self,
         bucket: str,
         key: str,
         local_path: str,
-        callback=None,
-        show_progress: bool = True,
+        callback: Optional[Callable[[int], None]] = None,
         progress_position: Optional[int] = None,
         progress_leave: Optional[bool] = None,
-    ) -> dict:
+        progress_mode: Optional[str] = None,
+        transfer_config: Optional[TransferConfig] = None,
+    ) -> dict[str, object]:
         """
         Download a file from S3.
 
@@ -69,7 +74,11 @@ class S3Client:
             key: S3 object key
             local_path: Local file path to save to
             callback: Optional callback function for download progress
-            show_progress: Show progress bar (default: True)
+            progress_position: Progress bar position (optional)
+            progress_leave: Leave progress bar after completion (optional)
+            progress_mode: Progress display mode ("progress", "compact",
+                          "disabled", default: "progress")
+            transfer_config: Optional TransferConfig for performance tuning
 
         Returns:
             Response metadata dict
@@ -82,31 +91,24 @@ class S3Client:
             metadata = self.client.head_object(Bucket=bucket, Key=key)
             file_size = metadata.get("ContentLength", 0)
 
-            # Create progress bar if needed
+            # Create progress bar if needed (progress_mode controls whether to show)
             pbar = None
             final_callback = callback
-            if show_progress and file_size > 0:
+            if file_size > 0 and (progress_mode or "progress") != "disabled":
                 pbar, progress_callback = create_progress_callback(
                     file_size,
                     desc=f"[download: {key}]",
+                    mode=progress_mode,
                     position=progress_position,
                     leave=progress_leave,
                 )
-                if callback:
-                    # Chain callbacks
-                    original_callback = callback
-
-                    def chained_callback(chunk):
-                        progress_callback(chunk)
-                        original_callback(chunk)
-
-                    final_callback = chained_callback
-                else:
-                    final_callback = progress_callback
+                final_callback = chain_callbacks(progress_callback, callback)
 
             try:
+                config = transfer_config or self.transfer_config
+
                 self.client.download_file(
-                    bucket, key, local_path, Callback=final_callback
+                    bucket, key, local_path, Callback=final_callback, config=config
                 )
             finally:
                 if pbar:
@@ -125,20 +127,25 @@ class S3Client:
         bucket: str,
         key: str,
         local_path: str,
-        callback=None,
-        show_progress: bool = True,
+        callback: Optional[Callable[[int], None]] = None,
         progress_position: Optional[int] = None,
         progress_leave: Optional[bool] = None,
-    ) -> dict:
+        progress_mode: Optional[str] = None,
+        transfer_config: Optional[TransferConfig] = None,
+    ) -> dict[str, object]:
         """
         Upload a file to S3.
 
         Args:
+            local_path: Local file path to upload
             bucket: S3 bucket name
             key: S3 object key
-            local_path: Local file path to upload
             callback: Optional callback function for upload progress
-            show_progress: Show progress bar (default: True)
+            progress_position: Progress bar position (optional)
+            progress_leave: Leave progress bar after completion (optional)
+            progress_mode: Progress display mode ("progress", "compact",
+                          "disabled", default: "progress")
+            transfer_config: Optional TransferConfig for performance tuning
 
         Returns:
             Response metadata dict
@@ -151,31 +158,23 @@ class S3Client:
 
             file_size = os.path.getsize(local_path)
 
-            # Create progress bar if needed
+            # Create progress bar if needed (progress_mode controls whether to show)
             pbar = None
             final_callback = callback
-            if show_progress and file_size > 0:
+            if file_size > 0 and (progress_mode or "progress") != "disabled":
                 pbar, progress_callback = create_progress_callback(
                     file_size,
                     desc=f"[upload: {key}]",
+                    mode=progress_mode,
                     position=progress_position,
                     leave=progress_leave,
                 )
-                if callback:
-                    # Chain callbacks
-                    original_callback = callback
-
-                    def chained_callback(chunk):
-                        progress_callback(chunk)
-                        original_callback(chunk)
-
-                    final_callback = chained_callback
-                else:
-                    final_callback = progress_callback
+                final_callback = chain_callbacks(progress_callback, callback)
 
             try:
+                config = transfer_config or self.transfer_config
                 self.client.upload_file(
-                    local_path, bucket, key, Callback=final_callback
+                    local_path, bucket, key, Callback=final_callback, Config=config
                 )
             finally:
                 if pbar:
@@ -191,7 +190,7 @@ class S3Client:
         except Exception as e:
             raise S3lyncError(f"Failed to upload {bucket}/{key}: {str(e)}") from e
 
-    def get_object_metadata(self, bucket: str, key: str) -> Optional[dict]:
+    def get_object_metadata(self, bucket: str, key: str) -> Optional[dict[str, Any]]:
         """
         Get S3 object metadata.
 
@@ -207,12 +206,13 @@ class S3Client:
         """
         try:
             metadata = self.client.head_object(Bucket=bucket, Key=key)
-            return metadata  # type: ignore
+            return metadata  # type: ignore[no-any-return]
         except ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 return None
             raise S3lyncError(
-                f"Failed to get metadata for {bucket}/{key}: {e.response['Error']['Message']}"
+                f"Failed to get metadata for {bucket}/{key}: "
+                f"{e.response['Error']['Message']}"
             ) from e
         except Exception as e:
             raise S3lyncError(
@@ -286,7 +286,7 @@ class S3Client:
         except Exception:
             return False
 
-    def list_files(self, bucket: str, prefix: str, recursive: bool = True) -> list:
+    def list_files(self, bucket: str, prefix: str, recursive: bool = True) -> list[str]:
         """
         List all files under prefix.
 
@@ -322,7 +322,7 @@ class S3Client:
 
         return files
 
-    def list_dirs(self, bucket: str, prefix: str, recursive: bool = True) -> list:
+    def list_dirs(self, bucket: str, prefix: str, recursive: bool = True) -> list[str]:
         """
         List all subdirectories under prefix.
 

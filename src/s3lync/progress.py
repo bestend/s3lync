@@ -6,12 +6,34 @@ import os
 import sys
 from typing import Any, Callable, Optional, Tuple
 
-try:
-    from tqdm import tqdm
-except ImportError:
-    tqdm = None  # type: ignore
+from tqdm import tqdm
 
-from .config import Config
+
+def chain_callbacks(
+    primary_callback: Callable[[int], None],
+    secondary_callback: Optional[Callable[[int], None]] = None,
+) -> Callable[[int], None]:
+    """
+    Chain two callback functions together.
+
+    Calls both callbacks in sequence when invoked. Useful for combining
+    progress bar updates with custom callbacks.
+
+    Args:
+        primary_callback: Primary callback to call
+        secondary_callback: Secondary callback to call (optional)
+
+    Returns:
+        Combined callback function
+    """
+    if secondary_callback is None:
+        return primary_callback
+
+    def combined_callback(chunk: int) -> None:
+        primary_callback(chunk)
+        secondary_callback(chunk)
+
+    return combined_callback
 
 
 class ProgressBar:
@@ -31,12 +53,26 @@ class ProgressBar:
         Args:
             total: Total size in bytes
             desc: Description to display
-            mode: Display mode ("progress", "compact", or "disabled")
-                  If None, uses S3LYNC_PROGRESS_MODE environment variable
+            mode: Display mode ("progress", "compact", "disabled", default: "progress")
+            position: Progress bar position (optional)
+            leave: Leave progress bar after completion (optional)
         """
+        # Validate mode
+        if mode is not None:
+            valid_modes = {"progress", "compact", "disabled"}
+            mode_lower = mode.lower()
+            if mode_lower not in valid_modes:
+                raise ValueError(
+                    f"Invalid progress_mode '{mode}'. "
+                    f"Must be one of: {', '.join(sorted(valid_modes))}"
+                )
+
         self.total = total
         self.desc = desc
-        self.mode = mode or Config.get_progress_mode()
+
+        # Use provided mode or default to "progress"
+        self.mode = (mode or "progress").lower()
+
         self.pbar: Optional[Any] = None
         self._transferred: int = 0  # used for compact one-shot print
         self._position = position
@@ -95,7 +131,9 @@ class ProgressBar:
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self, exc_type: object, exc_val: object, exc_tb: object
+    ) -> None:
         """Context manager exit."""
         self.close()
 
@@ -122,6 +160,8 @@ def create_progress_callback(
 
     def callback(bytes_amount: int) -> None:
         pbar.update(bytes_amount)
+
+    return pbar, callback
 
     return pbar, callback
 

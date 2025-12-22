@@ -6,10 +6,9 @@ import os
 import re
 import shutil
 from contextlib import contextmanager
-from typing import List, Optional, Union
+from typing import Any, Callable, Iterator, List, Optional, Union
 
 from .client import S3Client
-from .config import Config
 from .exceptions import HashMismatchError, S3ObjectError, SyncError
 from .hash import calculate_file_hash
 from .progress import ProgressBar
@@ -18,35 +17,39 @@ from .utils import ensure_parent_dir, get_cache_dir, normalize_path, parse_s3_ur
 
 class S3Object:
     """
-    Represents an S3 object (file or directory) that can be synced with local filesystem.
+    Represents an S3 object (file or directory) synchronized with local filesystem.
 
-    Provides automatic upload/download synchronization with MD5 hash verification.
-    Handles both files and directories with recursive operations.
+    Provides automatic upload/download synchronization with MD5 hash
+    verification. Handles both files and directories with recursive operations.
     """
+
+    _excludes: list[str]
 
     def __init__(
         self,
         s3_uri: str,
         local_path: Optional[str] = None,
-        region_name: Optional[str] = None,
+        boto3_client: Optional[object] = None,
         excludes: Union[str, List[str], None] = None,
+        progress_mode: str = "progress",
     ):
         """
         Initialize S3Object.
 
         Args:
-            s3_uri: S3 URI supporting multiple formats:
-                - s3://bucket/key (basic, uses environment variables for credentials)
-                - s3://endpoint@bucket/key (custom endpoint only)
-                - s3://access_key:secret_key@endpoint/bucket/key (custom endpoint + credentials)
-            local_path: Optional local file/directory path. If not provided, uses cache directory.
-            region_name: AWS region name (optional)
-            excludes: Regex pattern(s) to exclude files. Can be string or list of strings (optional)
+            s3_uri: S3 URI (s3://bucket/key, s3://endpoint@bucket/key, etc)
+            local_path: Local file/directory path (optional)
+            boto3_client: Pre-configured boto3 S3 client (recommended)
+            excludes: Exclude patterns (overrides default if provided)
+            progress_mode: Progress display mode: "progress", "compact",
+                          "disabled" (default: "progress")
 
-        Raises:
-            ValueError: If S3 URI format is invalid
+        Example:
+            session = boto3.Session(profile_name="dev")
+            obj = S3Object("s3://bucket/key", boto3_client=session.client("s3"))
         """
         self.s3_uri = s3_uri
+        self.progress_mode = progress_mode
         (
             self.bucket,
             self.key,
@@ -59,26 +62,35 @@ class S3Object:
         )
 
         # Initialize excludes with default hidden file patterns
-        self._excludes: list[str] = []
-        if Config.should_exclude_hidden():
+        # Or override with user-provided excludes if given
+        if excludes:
+            # User provided excludes - override defaults completely
+            if isinstance(excludes, str):
+                self._excludes = [excludes]
+            else:  # list
+                self._excludes = excludes.copy()
+        else:
+            # Use default excludes: hidden files, Python cache, and egg info
             self._excludes = [
                 r"/\.",  # Hidden files/dirs (.git, .pytest_cache, .venv, etc)
                 r"__pycache__",  # Python cache
                 r"\.egg-info",  # Egg info
             ]
 
-        if excludes:
-            if isinstance(excludes, str):
-                self._excludes.append(excludes)
-            elif isinstance(excludes, list):
-                self._excludes.extend(excludes)
+        # Initialize S3Client
+        if boto3_client is not None:
+            # Use the provided boto3 client directly
+            self._client = S3Client(client=boto3_client)
+        else:
+            # Create boto3 client from S3 URI credentials and endpoint
+            import boto3
 
-        self._client = S3Client(
-            region_name=region_name,
-            access_key=self._access_key,
-            secret_key=self._secret_key,
-            endpoint_url=self._endpoint,
-        )
+            session = boto3.Session(
+                aws_access_key_id=self._access_key,
+                aws_secret_access_key=self._secret_key,
+            )
+            created_client = session.client("s3", endpoint_url=self._endpoint)
+            self._client = S3Client(client=created_client)
 
     def _get_default_cache_path(self) -> str:
         """Get default cache path for this S3 object."""
@@ -94,6 +106,7 @@ class S3Object:
         self,
         use_checksum: bool = True,
         excludes: Union[str, List[str], None] = None,
+        progress_mode: Optional[str] = None,
         mirror: bool = False,
     ) -> str:
         """
@@ -101,10 +114,10 @@ class S3Object:
 
         Args:
             use_checksum: Verify file integrity with MD5 (default: True)
-            excludes: Regex pattern(s) to exclude files. Can be string or list of strings (default: None)
-            mirror: When True, makes local identical to remote (default: False).
-                - Downloads all remote files/directories
-                - Deletes local files/directories not present in remote
+            excludes: Additional regex pattern(s) to exclude (in addition to defaults)
+            progress_mode: Progress display mode ("progress", "compact", "disabled").
+                          If None, uses object's default
+            mirror: When True, makes local identical to remote (default: False)
 
         Returns:
             Local path
@@ -113,6 +126,9 @@ class S3Object:
             SyncError: If download fails
             HashMismatchError: If hash verification fails
         """
+        # Use provided progress_mode or fall back to object's default
+        actual_progress_mode = progress_mode or self.progress_mode
+
         # Combine self._excludes with excludes parameter
         all_excludes = self._excludes.copy()
         if excludes:
@@ -123,10 +139,21 @@ class S3Object:
 
         try:
             if self._client.is_file(self.bucket, self.key):
-                self._download_file(self.key, self._local_path, use_checksum, mirror)
+                self._download_file(
+                    self.key,
+                    self._local_path,
+                    use_checksum,
+                    mirror,
+                    progress_mode=actual_progress_mode,
+                )
             else:
                 self._download_dir(
-                    self.key, self._local_path, use_checksum, mirror, all_excludes
+                    self.key,
+                    self._local_path,
+                    use_checksum,
+                    mirror,
+                    all_excludes,
+                    actual_progress_mode,
                 )
         except SyncError:
             raise
@@ -141,7 +168,8 @@ class S3Object:
         local_path: str,
         use_checksum: bool,
         mirror: bool,
-        callback=None,
+        callback: Optional[Callable[[int], None]] = None,
+        progress_mode: Optional[str] = None,
         progress_position: Optional[int] = None,
         progress_leave: Optional[bool] = None,
     ) -> None:
@@ -158,12 +186,16 @@ class S3Object:
             remote_key,
             local_path,
             callback=callback,
+            progress_mode=progress_mode,
             progress_position=progress_position,
             progress_leave=progress_leave,
         )
 
         if use_checksum:
-            remote_etag = metadata.get("ETag", "").strip('"')
+            if metadata is None:
+                raise S3ObjectError(f"Failed to get metadata for {remote_key}")
+            etag_value = metadata.get("ETag", "")
+            remote_etag: str = str(etag_value).strip('"')
             local_hash = calculate_file_hash(local_path)
             # Skip hash check for multipart uploads (contains '-')
             if "-" not in remote_etag and local_hash != remote_etag:
@@ -179,8 +211,12 @@ class S3Object:
         use_checksum: bool,
         mirror: bool,
         excludes: Union[str, List[str], None] = None,
+        progress_mode: Optional[str] = None,
     ) -> None:
         """Download directory recursively from S3."""
+        # Use provided progress_mode or fall back to object's default
+        actual_progress_mode = progress_mode or self.progress_mode
+
         # Convert excludes to regex patterns
         exclude_regexes: list[re.Pattern[str]] = []
         if excludes:
@@ -257,7 +293,11 @@ class S3Object:
 
         # Overall progress bar (bytes-based)
         overall_pbar = ProgressBar(
-            total=total_bytes, desc="[overall]", position=0, leave=True
+            total=total_bytes,
+            desc="[overall]",
+            mode=actual_progress_mode,
+            position=0,
+            leave=True,
         )
 
         # Download files and subdirectories (hierarchical walk)
@@ -278,23 +318,20 @@ class S3Object:
                 if any(regex.search(local_file) for regex in exclude_regexes):
                     continue
 
-                # Chain overall progress via callback
-                def overall_callback_factory(pbar: ProgressBar):
-                    def _cb(n: int) -> None:
-                        try:
-                            pbar.update(n)
-                        except Exception:
-                            pass
+                # Create callback for overall progress
+                def overall_callback(n: int) -> None:
+                    try:
+                        overall_pbar.update(n)
+                    except Exception:
+                        pass
 
-                    return _cb
-
-                overall_cb = overall_callback_factory(overall_pbar)
                 self._download_file(
                     remote_key,
                     local_file,
                     use_checksum,
                     mirror,
-                    callback=overall_cb,
+                    callback=overall_callback,
+                    progress_mode=actual_progress_mode,
                     progress_position=1,
                     progress_leave=False,
                 )
@@ -305,7 +342,12 @@ class S3Object:
                 relative_path = os.path.relpath(remote_subdir, remote_prefix)
                 local_subdir = os.path.join(local_dir, relative_path)
                 self._download_dir(
-                    remote_subdir, local_subdir, use_checksum, mirror, excludes
+                    remote_subdir,
+                    local_subdir,
+                    use_checksum,
+                    mirror,
+                    excludes,
+                    progress_mode,
                 )
 
         # Close overall progress
@@ -318,6 +360,7 @@ class S3Object:
         self,
         use_checksum: bool = True,
         excludes: Union[str, List[str], None] = None,
+        progress_mode: Optional[str] = None,
         mirror: bool = False,
     ) -> str:
         """
@@ -325,10 +368,10 @@ class S3Object:
 
         Args:
             use_checksum: Verify file integrity (default: True)
-            excludes: Regex pattern(s) to exclude files. Can be string or list of strings (default: None)
-            mirror: When True, makes remote identical to local (default: False).
-                - Uploads all local files/directories
-                - Deletes remote files/directories not present in local
+            excludes: Additional regex pattern(s) to exclude (in addition to defaults)
+            progress_mode: Progress display mode ("progress", "compact", "disabled").
+                          If None, uses object's default
+            mirror: When True, makes remote identical to local (default: False)
 
         Returns:
             S3 URI
@@ -339,6 +382,9 @@ class S3Object:
         """
         if not os.path.exists(self._local_path):
             raise S3ObjectError(f"Local path does not exist: {self._local_path}")
+
+        # Use provided progress_mode or fall back to object's default
+        actual_progress_mode = progress_mode or self.progress_mode
 
         # Combine self._excludes with excludes parameter
         all_excludes = self._excludes.copy()
@@ -355,10 +401,21 @@ class S3Object:
 
         try:
             if os.path.isfile(self._local_path):
-                self._upload_file(self.key, self._local_path, use_checksum, mirror)
+                self._upload_file(
+                    self.key,
+                    self._local_path,
+                    use_checksum,
+                    mirror,
+                    progress_mode=actual_progress_mode,
+                )
             else:
                 self._upload_dir(
-                    self.key, self._local_path, use_checksum, exclude_regexes, mirror
+                    self.key,
+                    self._local_path,
+                    use_checksum,
+                    exclude_regexes,
+                    mirror,
+                    actual_progress_mode,
                 )
         except SyncError:
             raise
@@ -373,7 +430,8 @@ class S3Object:
         local_path: str,
         use_checksum: bool,
         mirror: bool,
-        callback=None,
+        callback: Optional[Callable[[int], None]] = None,
+        progress_mode: Optional[str] = None,
         progress_position: Optional[int] = None,
         progress_leave: Optional[bool] = None,
     ) -> None:
@@ -388,6 +446,7 @@ class S3Object:
             remote_key,
             local_path,
             callback=callback,
+            progress_mode=progress_mode,
             progress_position=progress_position,
             progress_leave=progress_leave,
         )
@@ -399,8 +458,12 @@ class S3Object:
         use_checksum: bool,
         exclude_regexes: List[re.Pattern[str]],
         mirror: bool,
+        progress_mode: Optional[str] = None,
     ) -> None:
         """Upload directory recursively to S3."""
+        # Use provided progress_mode or fall back to object's default
+        actual_progress_mode = progress_mode or self.progress_mode
+
         if not remote_prefix.endswith("/"):
             remote_prefix += "/"
 
@@ -448,7 +511,11 @@ class S3Object:
 
         # Overall progress bar (bytes-based)
         overall_pbar = ProgressBar(
-            total=total_bytes, desc="[overall]", position=0, leave=True
+            total=total_bytes,
+            desc="[overall]",
+            mode=actual_progress_mode,
+            position=0,
+            leave=True,
         )
 
         # Upload files
@@ -465,23 +532,20 @@ class S3Object:
 
                 remote_key = f"{remote_prefix}{relative_path}"
 
-                # Chain overall progress via callback
-                def overall_callback_factory(pbar: ProgressBar):
-                    def _cb(n: int) -> None:
-                        try:
-                            pbar.update(n)
-                        except Exception:
-                            pass
+                # Create callback for overall progress
+                def overall_callback(n: int) -> None:
+                    try:
+                        overall_pbar.update(n)
+                    except Exception:
+                        pass
 
-                    return _cb
-
-                overall_cb = overall_callback_factory(overall_pbar)
                 self._upload_file(
                     remote_key,
                     local_file,
                     use_checksum,
                     mirror,
-                    callback=overall_cb,
+                    callback=overall_callback,
+                    progress_mode=actual_progress_mode,
                     progress_position=1,
                     progress_leave=False,
                 )
@@ -522,7 +586,7 @@ class S3Object:
             return False
 
     @contextmanager
-    def open(self, mode: str = "r", encoding: str = "utf-8"):
+    def open(self, mode: str = "r", encoding: str = "utf-8") -> Iterator[Any]:
         """
         Context manager to open S3 object as a file.
 

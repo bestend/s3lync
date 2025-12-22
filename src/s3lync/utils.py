@@ -16,12 +16,13 @@ def parse_s3_uri(
 
     Supports multiple formats:
     - s3://bucket/key (basic, uses environment variables for credentials)
+    - s3://https://endpoint/bucket/key (custom endpoint with protocol)
     - s3://endpoint@bucket/key (custom endpoint only)
     - s3://secret_key:access_key@endpoint/bucket/key (custom endpoint + credentials)
     - s3://secret_key:access_key@https://endpoint/bucket/key (with http/https protocol)
 
     Args:
-        s3_uri: S3 URI in format "s3://[secret_key:access_key@][endpoint/]bucket/key"
+        s3_uri: S3 URI in format "s3://[secret_key:access_key@][https://]endpoint/bucket/key"
 
     Returns:
         Tuple of (bucket, key, access_key, secret_key, endpoint)
@@ -91,11 +92,30 @@ def parse_s3_uri(
                 )
             bucket, key = rest_parts[0], rest_parts[1]
     else:
-        # Format: bucket/key (basic, no endpoint or credentials)
-        parts = uri_body.split("/", 1)
-        if len(parts) < 2:
-            raise ValueError(f"Invalid S3 URI: {s3_uri}. Format: s3://bucket/key")
-        bucket, key = parts[0], parts[1]
+        # No @ symbol - check if it starts with http:// or https://
+        if uri_body.startswith("http://") or uri_body.startswith("https://"):
+            # Format: s3://https://endpoint/bucket/key
+            if uri_body.startswith("https://"):
+                protocol = "https://"
+                rest_without_protocol = uri_body[8:]  # len("https://") = 8
+            else:
+                protocol = "http://"
+                rest_without_protocol = uri_body[7:]  # len("http://") = 7
+
+            rest_parts = rest_without_protocol.split("/", 2)
+            if len(rest_parts) < 3:
+                raise ValueError(
+                    f"Invalid S3 URI: {s3_uri}. Format: s3://https://endpoint/bucket/key"
+                )
+            endpoint = protocol + rest_parts[0]
+            bucket = rest_parts[1]
+            key = rest_parts[2]
+        else:
+            # Format: bucket/key (basic, no endpoint or credentials)
+            parts = uri_body.split("/", 1)
+            if len(parts) < 2:
+                raise ValueError(f"Invalid S3 URI: {s3_uri}. Format: s3://bucket/key")
+            bucket, key = parts[0], parts[1]
 
     if not bucket or not key:
         raise ValueError(f"Invalid S3 URI: {s3_uri}. Bucket and key cannot be empty")

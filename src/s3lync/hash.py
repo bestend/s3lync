@@ -41,7 +41,7 @@ def verify_hash(file_path: str, expected_hash: str, algorithm: str = "md5") -> b
     return calculate_file_hash(file_path, algorithm) == expected_hash
 
 
-def get_s3_etag(s3_response: dict) -> str:
+def get_s3_etag(s3_response: dict[str, str]) -> str:
     """
     Extract and clean S3 ETag from response.
 

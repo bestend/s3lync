@@ -131,9 +131,7 @@ class ProgressBar:
         """Context manager entry."""
         return self
 
-    def __exit__(
-        self, exc_type: object, exc_val: object, exc_tb: object
-    ) -> None:
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         """Context manager exit."""
         self.close()
 

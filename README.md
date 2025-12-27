@@ -146,6 +146,37 @@ S3Object("s3://mysecret:mykey@https://minio.example.com/my-bucket/data.json")
 
 ## Common Operations
 
+### Working with S3 Objects Like Files
+
+**Method 1: Context manager with automatic sync (Recommended!)**
+```python
+# Auto-downloads on read, auto-uploads on write
+obj = S3Object("s3://bucket/token.json")
+with obj.open("w") as f:
+    json.dump({"access_token": "abc123"}, f)
+
+with obj.open("r") as f:
+    token = json.load(f)
+```
+
+**Method 2: Standard Python `open()` (pathlib-compatible)**
+```python
+# S3Object implements __fspath__() protocol
+obj.download()  # Manual sync
+with open(obj, "r") as f:  # Works like a path!
+    data = json.load(f)
+obj.upload()  # Manual sync
+```
+
+**Method 3: Direct local_path access**
+```python
+# Direct file path manipulation
+obj.download()
+with open(obj.local_path, "r") as f:
+    data = f.read()
+obj.upload()
+```
+
 ### Basic Download / Upload
 
 ```python

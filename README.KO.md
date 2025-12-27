@@ -146,13 +146,44 @@ S3Object("s3://mysecret:mykey@https://minio.example.com/my-bucket/data.json")
 
 ## 자주 사용하는 작업
 
+### S3 객체를 파일처럼 사용하기
+
+**방법 1: 컨텍스트 매니저 (자동 동기화, 권장!)**
+```python
+# 읽기 시 자동 다운로드, 쓰기 시 자동 업로드
+obj = S3Object("s3://bucket/token.json")
+with obj.open("w") as f:
+    json.dump({"access_token": "abc123"}, f)
+
+with obj.open("r") as f:
+    token = json.load(f)
+```
+
+**방법 2: 표준 Python `open()` (pathlib 호환)**
+```python
+# S3Object는 __fspath__() 프로토콜 구현
+obj.download()  # 수동 동기화
+with open(obj, "r") as f:  # 경로처럼 동작!
+    data = json.load(f)
+obj.upload()  # 수동 동기화
+```
+
+**방법 3: local_path 직접 접근**
+```python
+# 파일 경로 직접 조작
+obj.download()
+with open(obj.local_path, "r") as f:
+    data = f.read()
+obj.upload()
+```
+
 ### 기본 다운로드 / 업로드
 
 ```python
 # 기본 다운로드
 obj.download()
 
-# 강제 동기화: 원격과 로컬 동일하게 (필요 시 원격 파일 삭제)
+# 강제 동기화: 로컬과 원격을 동일하게 만듦 (필요시 추가 원격 파일 삭제)
 obj.upload(mirror=True)
 ```
 

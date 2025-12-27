@@ -637,6 +637,7 @@ class S3Object:
         """Delete S3 object (file or directory)."""
         return self._client.delete_object(self.bucket, self.key)
 
+
     def add_exclude(self, pattern: str) -> "S3Object":
         """
         Add an exclude pattern.
@@ -697,6 +698,21 @@ class S3Object:
             List of exclude patterns
         """
         return self._excludes.copy()
+
+    def __fspath__(self) -> str:
+        """
+        Return the file system path representation.
+
+        This allows S3Object to be used with open() and pathlib operations.
+        Note: Requires manual sync (download/upload) unlike the .open() method.
+
+        Example:
+            obj = S3Object("s3://bucket/file.json")
+            obj.download()  # Sync from S3
+            with open(obj, "r") as f:  # Works like a path!
+                data = f.read()
+        """
+        return self._local_path
 
     def __repr__(self) -> str:
         """String representation of S3Object."""

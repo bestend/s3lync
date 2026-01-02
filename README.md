@@ -61,11 +61,21 @@ s3lync focuses on **developer experience**.
 pip install s3lync
 ```
 
+### Async Support (Optional)
+
+For async I/O operations, install `aioboto3`:
+
+```bash
+pip install s3lync[async]
+# or
+pip install aioboto3
+```
+
 ---
 
 ## Quick Start
 
-### Basic Usage
+### Basic Usage (Sync)
 
 ```python
 from s3lync import S3Object
@@ -80,8 +90,28 @@ obj.download()
 obj.upload()
 ```
 
+### Async Usage
+
+```python
+from s3lync import AsyncS3Object
+import asyncio
+
+async def main():
+    # Create S3 object reference
+    obj = AsyncS3Object("s3://my-bucket/path/to/file.txt")
+    
+    # Download from S3 asynchronously
+    await obj.download()
+    
+    # Upload to S3 asynchronously
+    await obj.upload()
+
+asyncio.run(main())
+```
+
 ### With boto3 Client (Recommended)
 
+**Sync version:**
 ```python
 from s3lync import S3Object
 import boto3
@@ -98,6 +128,28 @@ obj = S3Object(
 )
 
 obj.upload()
+```
+
+**Async version:**
+```python
+from s3lync import AsyncS3Object
+import aioboto3
+import asyncio
+
+async def main():
+    # Create aioboto3 session
+    session = aioboto3.Session()
+    
+    # Create AsyncS3Object with session
+    obj = AsyncS3Object(
+        "s3://bucket/key",
+        local_path="./local",
+        aioboto3_session=session,
+    )
+    
+    await obj.upload()
+
+asyncio.run(main())
 ```
 
 ---
@@ -149,6 +201,8 @@ S3Object("s3://mysecret:mykey@https://minio.example.com/my-bucket/data.json")
 ### Working with S3 Objects Like Files
 
 **Method 1: Context manager with automatic sync (Recommended!)**
+
+Sync:
 ```python
 # Auto-downloads on read, auto-uploads on write
 obj = S3Object("s3://bucket/token.json")
@@ -157,6 +211,25 @@ with obj.open("w") as f:
 
 with obj.open("r") as f:
     token = json.load(f)
+```
+
+Async:
+```python
+import asyncio
+from s3lync import AsyncS3Object
+
+async def main():
+    obj = AsyncS3Object("s3://bucket/token.json")
+    
+    # Auto-uploads on write
+    async with obj.open("w") as f:
+        f.write('{"access_token": "abc123"}')
+    
+    # Auto-downloads on read
+    async with obj.open("r") as f:
+        data = f.read()
+
+asyncio.run(main())
 ```
 
 **Method 2: Standard Python `open()` (pathlib-compatible)**
@@ -191,6 +264,7 @@ obj.upload(mirror=True)
 
 s3lync supports recursive directory download and upload with smart change detection.
 
+**Sync version:**
 ```python
 # Download entire directory
 obj = S3Object("s3://bucket/path/to/dir")
@@ -202,6 +276,44 @@ obj.upload()
 # Mirror mode: delete files not present in source
 obj.download(mirror=True)  # Deletes local files not in S3
 obj.upload(mirror=True)    # Deletes remote files not in local
+```
+
+**Async version (faster with parallel processing):**
+```python
+import asyncio
+from s3lync import AsyncS3Object
+
+async def main():
+    obj = AsyncS3Object("s3://bucket/path/to/dir")
+    
+    # Download entire directory asynchronously
+    await obj.download()
+    
+    # Upload entire directory asynchronously
+    await obj.upload()
+    
+    # Mirror mode
+    await obj.download(mirror=True)
+    await obj.upload(mirror=True)
+
+asyncio.run(main())
+```
+
+**Sync multiple directories in parallel:**
+```python
+import asyncio
+from s3lync import AsyncS3Object
+
+async def sync_multiple():
+    # Download multiple directories concurrently
+    tasks = [
+        AsyncS3Object("s3://bucket/dir1").download(),
+        AsyncS3Object("s3://bucket/dir2").download(),
+        AsyncS3Object("s3://bucket/dir3").download(),
+    ]
+    await asyncio.gather(*tasks)
+
+asyncio.run(sync_multiple())
 ```
 
 ### Exclude Patterns
@@ -364,6 +476,14 @@ obj = S3Object(
     progress_mode="compact"
 )
 ```
+
+**Progress Mode Options:**
+- `"progress"` (default): Live tqdm progress bar with real-time updates
+- `"compact"`: Summary output only on completion (non-interactive, great for CI/CD)
+- `"disabled"`: No progress display
+
+**Note:** In non-TTY environments (e.g., PyCharm console), progress bar rendering is auto-adjusted for compatibility.
+
 ---
 
 ## License

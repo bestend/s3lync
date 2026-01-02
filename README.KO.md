@@ -61,11 +61,21 @@ s3lync는 **개발자 경험(DX)**에 집중합니다.
 pip install s3lync
 ```
 
+### 비동기 지원 (선택 사항)
+
+비동기 I/O 기능을 사용하려면 `aioboto3`를 추가로 설치하세요:
+
+```bash
+pip install s3lync[async]
+# 또는
+pip install aioboto3
+```
+
 ---
 
 ## 빠른 시작
 
-### 기본 사용법
+### 기본 사용법 (동기)
 
 ```python
 from s3lync import S3Object
@@ -80,8 +90,28 @@ obj.download()
 obj.upload()
 ```
 
+### 비동기 사용법
+
+```python
+from s3lync import AsyncS3Object
+import asyncio
+
+async def main():
+    # S3 객체 참조 생성
+    obj = AsyncS3Object("s3://my-bucket/path/to/file.txt")
+    
+    # S3에서 비동기 다운로드
+    await obj.download()
+    
+    # S3에 비동기 업로드
+    await obj.upload()
+
+asyncio.run(main())
+```
+
 ### boto3 Client 사용 (권장)
 
+**동기 방식:**
 ```python
 from s3lync import S3Object
 import boto3
@@ -98,6 +128,28 @@ obj = S3Object(
 )
 
 obj.upload()
+```
+
+**비동기 방식:**
+```python
+from s3lync import AsyncS3Object
+import aioboto3
+import asyncio
+
+async def main():
+    # aioboto3 session 생성
+    session = aioboto3.Session()
+    
+    # AsyncS3Object 생성 (session 주입)
+    obj = AsyncS3Object(
+        "s3://bucket/key",
+        local_path="./local",
+        aioboto3_session=session,
+    )
+    
+    await obj.upload()
+
+asyncio.run(main())
 ```
 
 ---
@@ -149,6 +201,8 @@ S3Object("s3://mysecret:mykey@https://minio.example.com/my-bucket/data.json")
 ### S3 객체를 파일처럼 사용하기
 
 **방법 1: 컨텍스트 매니저 (자동 동기화, 권장!)**
+
+동기:
 ```python
 # 읽기 시 자동 다운로드, 쓰기 시 자동 업로드
 obj = S3Object("s3://bucket/token.json")
@@ -157,6 +211,25 @@ with obj.open("w") as f:
 
 with obj.open("r") as f:
     token = json.load(f)
+```
+
+비동기:
+```python
+import asyncio
+from s3lync import AsyncS3Object
+
+async def main():
+    obj = AsyncS3Object("s3://bucket/token.json")
+    
+    # 쓰기 시 자동 업로드
+    async with obj.open("w") as f:
+        f.write('{"access_token": "abc123"}')
+    
+    # 읽기 시 자동 다운로드
+    async with obj.open("r") as f:
+        data = f.read()
+
+asyncio.run(main())
 ```
 
 **방법 2: 표준 Python `open()` (pathlib 호환)**
@@ -191,6 +264,7 @@ obj.upload(mirror=True)
 
 s3lync는 스마트한 변경 감지를 통한 재귀적 디렉토리 다운로드/업로드를 지원합니다.
 
+**동기 방식:**
 ```python
 # 전체 디렉토리 다운로드
 obj = S3Object("s3://bucket/path/to/dir")
@@ -202,6 +276,44 @@ obj.upload()
 # Mirror 모드: 원본에 없는 파일 삭제
 obj.download(mirror=True)  # S3에 없는 로컬 파일 삭제
 obj.upload(mirror=True)    # 로컬에 없는 원격 파일 삭제
+```
+
+**비동기 방식 (병렬 처리로 더 빠름):**
+```python
+import asyncio
+from s3lync import AsyncS3Object
+
+async def main():
+    obj = AsyncS3Object("s3://bucket/path/to/dir")
+    
+    # 비동기로 전체 디렉토리 다운로드
+    await obj.download()
+    
+    # 비동기로 전체 디렉토리 업로드
+    await obj.upload()
+    
+    # Mirror 모드
+    await obj.download(mirror=True)
+    await obj.upload(mirror=True)
+
+asyncio.run(main())
+```
+
+**여러 디렉토리 병렬 동기화:**
+```python
+import asyncio
+from s3lync import AsyncS3Object
+
+async def sync_multiple():
+    # 여러 디렉토리를 동시에 다운로드
+    tasks = [
+        AsyncS3Object("s3://bucket/dir1").download(),
+        AsyncS3Object("s3://bucket/dir2").download(),
+        AsyncS3Object("s3://bucket/dir3").download(),
+    ]
+    await asyncio.gather(*tasks)
+
+asyncio.run(sync_multiple())
 ```
 
 ### Exclude Patterns

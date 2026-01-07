@@ -108,7 +108,7 @@ class S3Client:
                 config = transfer_config or self.transfer_config
 
                 self.client.download_file(
-                    bucket, key, local_path, Callback=final_callback, config=config
+                    bucket, key, local_path, Callback=final_callback, Config=config
                 )
             finally:
                 if pbar:

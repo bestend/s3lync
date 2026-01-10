@@ -10,13 +10,13 @@ from contextlib import contextmanager
 from typing import Any, Callable, Iterator, List, Optional, Tuple, Union
 
 from .client import S3Client
-from .logging import get_logger
-
-_logger = get_logger("core")
 from .exceptions import HashMismatchError, S3ObjectError, SyncError
 from .hash import calculate_file_hash
+from .logging import get_logger
 from .progress import ProgressBar
 from .utils import ensure_parent_dir, get_cache_dir, normalize_path, parse_s3_uri
+
+_logger = get_logger("core")
 
 
 class S3Object:

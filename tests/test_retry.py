@@ -2,10 +2,6 @@
 Tests for retry utilities.
 """
 
-import asyncio
-import time
-from unittest.mock import MagicMock, patch
-
 import pytest
 from botocore.exceptions import ClientError
 

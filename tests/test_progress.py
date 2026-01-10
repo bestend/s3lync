@@ -3,17 +3,16 @@ Tests for progress bar utilities.
 """
 
 import sys
-from io import StringIO
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from s3lync.progress import (
     ProgressBar,
-    chain_callbacks,
-    create_progress_callback,
     _format_bytes,
     _is_pycharm_console,
+    chain_callbacks,
+    create_progress_callback,
 )
 
 

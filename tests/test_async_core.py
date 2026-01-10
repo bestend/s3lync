@@ -2,7 +2,6 @@
 Tests for async S3Object operations.
 """
 
-import asyncio
 import os
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from s3lync.async_core import AsyncS3Object
-from s3lync.exceptions import HashMismatchError, S3ObjectError, SyncError
+from s3lync.exceptions import S3ObjectError
 
 
 @pytest.fixture

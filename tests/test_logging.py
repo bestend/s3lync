@@ -5,8 +5,6 @@ Tests for logging utilities.
 import logging
 from io import StringIO
 
-import pytest
-
 from s3lync.logging import configure_logging, get_logger, logger
 
 

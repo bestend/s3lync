@@ -36,10 +36,12 @@ class TestIsRetryableError:
     def test_connection_error_types(self):
         """Test that connection errors are retryable by name."""
 
-        class ConnectionError(Exception):
+        # Custom class with ConnectionError name to test name-based detection
+        class MockConnectionError(Exception):
             pass
 
-        error = ConnectionError("Connection failed")
+        MockConnectionError.__name__ = "ConnectionError"
+        error = MockConnectionError("Connection failed")
         assert is_retryable_error(error) is True
 
     def test_generic_exception(self):

@@ -502,6 +502,7 @@ class AsyncS3Object:
                 try:
                     pbar.update(n)
                 except Exception:
+                    # Progress bar failures should not interrupt transfers
                     pass
 
             return callback

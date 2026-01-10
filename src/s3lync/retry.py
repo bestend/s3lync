@@ -78,7 +78,7 @@ def calculate_backoff(
         Delay in seconds
     """
     # Exponential backoff: base_delay * 2^attempt
-    delay = min(base_delay * (2**attempt), max_delay)
+    delay: float = min(base_delay * (2**attempt), max_delay)
 
     if jitter:
         # Full jitter: random value between 0 and calculated delay

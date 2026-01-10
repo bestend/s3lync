@@ -348,7 +348,11 @@ class S3Object:
             configured_max_workers = 8
         if configured_max_workers < 1:
             configured_max_workers = 1
-        max_workers = min(configured_max_workers, len(files_to_download)) if files_to_download else 1
+        max_workers = (
+            min(configured_max_workers, len(files_to_download))
+            if files_to_download
+            else 1
+        )
         first_exception: Optional[Exception] = None
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
@@ -367,7 +371,7 @@ class S3Object:
             ]
             for future in as_completed(futures):
                 exc = future.exception()
-                if exc:
+                if exc and isinstance(exc, Exception):
                     _logger.error(f"Download failed: {exc}")
                     if first_exception is None:
                         first_exception = exc
@@ -587,7 +591,9 @@ class S3Object:
             configured_max_workers = 8
         if configured_max_workers < 1:
             configured_max_workers = 1
-        max_workers = min(configured_max_workers, len(files_to_upload)) if files_to_upload else 1
+        max_workers = (
+            min(configured_max_workers, len(files_to_upload)) if files_to_upload else 1
+        )
         first_exception: Optional[Exception] = None
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
@@ -606,7 +612,7 @@ class S3Object:
             ]
             for future in as_completed(futures):
                 exc = future.exception()
-                if exc:
+                if exc and isinstance(exc, Exception):
                     _logger.error(f"Upload failed: {exc}")
                     if first_exception is None:
                         first_exception = exc

@@ -1,8 +1,8 @@
 """
 Test new features: __fspath__(), read_json(), write_json(), etc.
 """
-import json
 import os
+
 from s3lync import S3Object
 
 

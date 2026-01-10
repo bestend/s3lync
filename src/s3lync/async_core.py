@@ -486,7 +486,7 @@ class AsyncS3Object:
                     local_subdir,
                     use_checksum,
                     mirror,
-                    exclude_regexes,
+                    [p.pattern for p in exclude_regexes],
                     progress_mode,
                 )
 
@@ -588,7 +588,7 @@ class AsyncS3Object:
                 local_subdir,
                 use_checksum,
                 mirror,
-                exclude_regexes,
+                [p.pattern for p in exclude_regexes],
                 progress_mode,
             )
 

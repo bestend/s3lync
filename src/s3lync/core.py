@@ -341,7 +341,14 @@ class S3Object:
                 subdirs_to_process.append((remote_subdir, local_subdir))
 
         # Download files in parallel
-        max_workers = min(8, len(files_to_download)) if files_to_download else 1
+        env_max_workers = os.getenv("S3LYNC_MAX_WORKERS")
+        try:
+            configured_max_workers = int(env_max_workers) if env_max_workers else 8
+        except ValueError:
+            configured_max_workers = 8
+        if configured_max_workers < 1:
+            configured_max_workers = 1
+        max_workers = min(configured_max_workers, len(files_to_download)) if files_to_download else 1
         first_exception: Optional[Exception] = None
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
@@ -573,7 +580,14 @@ class S3Object:
                 files_to_upload.append((remote_key, local_file))
 
         # Upload files in parallel
-        max_workers = min(8, len(files_to_upload)) if files_to_upload else 1
+        env_max_workers = os.getenv("S3LYNC_MAX_WORKERS")
+        try:
+            configured_max_workers = int(env_max_workers) if env_max_workers else 8
+        except ValueError:
+            configured_max_workers = 8
+        if configured_max_workers < 1:
+            configured_max_workers = 1
+        max_workers = min(configured_max_workers, len(files_to_upload)) if files_to_upload else 1
         first_exception: Optional[Exception] = None
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [

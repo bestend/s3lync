@@ -4,7 +4,7 @@ Logging configuration for s3lync.
 
 import logging
 import sys
-from typing import Optional
+from typing import Optional, TextIO
 
 # Create package logger
 logger = logging.getLogger("s3lync")
@@ -16,7 +16,7 @@ logger.addHandler(logging.NullHandler())
 def configure_logging(
     level: int = logging.INFO,
     format_string: Optional[str] = None,
-    stream: Optional[object] = None,
+    stream: Optional[TextIO] = None,
 ) -> logging.Logger:
     """
     Configure s3lync logging.

@@ -440,7 +440,14 @@ class AsyncS3Object:
                     subdirs_to_process.append((remote_subdir, local_subdir))
 
             # Download files in parallel using asyncio.gather with semaphore
-            sem = asyncio.Semaphore(8)  # Limit concurrent downloads
+            env_max_workers = os.getenv("S3LYNC_MAX_WORKERS")
+            try:
+                max_concurrency = int(env_max_workers) if env_max_workers else 8
+            except ValueError:
+                max_concurrency = 8
+            if max_concurrency < 1:
+                max_concurrency = 1
+            sem = asyncio.Semaphore(max_concurrency)  # Limit concurrent downloads
 
             async def download_with_sem(remote_key: str, local_file: str) -> None:
                 async with sem:
@@ -536,7 +543,14 @@ class AsyncS3Object:
                 subdirs_to_process.append((remote_subdir, local_subdir))
 
         # Download files in parallel using asyncio.gather with semaphore
-        sem = asyncio.Semaphore(8)
+        env_max_workers = os.getenv("S3LYNC_MAX_WORKERS")
+        try:
+            max_concurrency = int(env_max_workers) if env_max_workers else 8
+        except ValueError:
+            max_concurrency = 8
+        if max_concurrency < 1:
+            max_concurrency = 1
+        sem = asyncio.Semaphore(max_concurrency)
 
         async def download_with_sem(remote_key: str, local_file: str) -> None:
             async with sem:
@@ -755,7 +769,14 @@ class AsyncS3Object:
                 files_to_upload.append((remote_key, local_file))
 
         # Upload files in parallel using asyncio.gather with semaphore
-        sem = asyncio.Semaphore(8)
+        env_max_workers = os.getenv("S3LYNC_MAX_WORKERS")
+        try:
+            max_concurrency = int(env_max_workers) if env_max_workers else 8
+        except ValueError:
+            max_concurrency = 8
+        if max_concurrency < 1:
+            max_concurrency = 1
+        sem = asyncio.Semaphore(max_concurrency)
 
         async def upload_with_sem(remote_key: str, local_file: str) -> None:
             async with sem:

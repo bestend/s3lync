@@ -6,7 +6,7 @@ import asyncio
 import functools
 import random
 import time
-from typing import Any, Callable, Optional, Tuple, Type, TypeVar
+from typing import Any, Awaitable, Callable, Optional, Tuple, Type, TypeVar
 
 from botocore.exceptions import ClientError
 
@@ -162,7 +162,7 @@ def async_retry(
     max_delay: float = 30.0,
     retryable_exceptions: Optional[Tuple[Type[Exception], ...]] = None,
     on_retry: Optional[Callable[[Exception, int], None]] = None,
-) -> Callable[[Callable[..., T]], Callable[..., T]]:
+) -> Callable[[Callable[..., Awaitable[T]]], Callable[..., Awaitable[T]]]:
     """
     Decorator for async functions with retry logic.
 
@@ -184,7 +184,7 @@ def async_retry(
     if retryable_exceptions is None:
         retryable_exceptions = (Exception,)
 
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+    def decorator(func: Callable[..., Awaitable[T]]) -> Callable[..., Awaitable[T]]:
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> T:
             last_exception: Optional[Exception] = None

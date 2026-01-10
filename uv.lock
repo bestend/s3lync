@@ -1354,6 +1354,7 @@ async = [
     { name = "aioboto3" },
 ]
 dev = [
+    { name = "aioboto3" },
     { name = "mypy" },
     { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "pytest", version = "9.0.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
@@ -1367,6 +1368,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aioboto3", marker = "extra == 'async'", specifier = ">=12.0.0" },
+    { name = "aioboto3", marker = "extra == 'dev'", specifier = ">=12.0.0" },
     { name = "boto3", specifier = ">=1.26.0" },
     { name = "boto3-stubs", specifier = "~=1.42.14" },
     { name = "botocore", specifier = ">=1.29.0" },

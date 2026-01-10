@@ -122,7 +122,7 @@ class S3Client:
             return metadata  # type: ignore
         except ClientError as e:
             raise S3lyncError(
-                f"Failed to download {bucket}/{key}: {e.response['Error']['Message']}"
+                f"Failed to download {bucket}/{key}: {e.response.get('Error', {}).get('Message', str(e))}"
             ) from e
         except Exception as e:
             raise S3lyncError(f"Failed to download {bucket}/{key}: {str(e)}") from e
@@ -191,8 +191,9 @@ class S3Client:
             return response  # type: ignore
         except ClientError as e:
             raise S3lyncError(
-                f"Failed to upload {bucket}/{key}: {e.response['Error']['Message']}"
+                f"Failed to upload {bucket}/{key}: {e.response.get('Error', {}).get('Message', str(e))}"
             ) from e
+
         except Exception as e:
             raise S3lyncError(f"Failed to upload {bucket}/{key}: {str(e)}") from e
 
@@ -214,11 +215,11 @@ class S3Client:
             metadata = self.client.head_object(Bucket=bucket, Key=key)
             return metadata  # type: ignore[no-any-return]
         except ClientError as e:
-            if e.response["Error"]["Code"] == "404":
+            if e.response.get("Error", {}).get("Code") == "404":
                 return None
             raise S3lyncError(
                 f"Failed to get metadata for {bucket}/{key}: "
-                f"{e.response['Error']['Message']}"
+                f"{e.response.get('Error', {}).get('Message', str(e))}"
             ) from e
         except Exception as e:
             raise S3lyncError(
@@ -240,7 +241,7 @@ class S3Client:
             self.client.head_object(Bucket=bucket, Key=key)
             return True
         except ClientError as e:
-            if e.response["Error"]["Code"] == "404":
+            if e.response.get("Error", {}).get("Code") == "404":
                 return False
             raise
         except Exception:

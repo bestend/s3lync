@@ -6,8 +6,10 @@ import os
 import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from typing import Any, Callable, Iterator, List, Optional, Tuple, Union
+
+from botocore.exceptions import ClientError
 
 from .client import S3Client
 from .exceptions import HashMismatchError, S3ObjectError, SyncError
@@ -252,10 +254,8 @@ class S3Object:
                     remote_key = f"{remote_prefix}{relative_path}"
 
                     if remote_key not in remote_files:
-                        try:
+                        with suppress(OSError):
                             os.remove(file_path)
-                        except Exception:
-                            pass
 
                 # Delete empty directories not in remote
                 for dir_name in dirs:
@@ -268,10 +268,7 @@ class S3Object:
                     # Check if this directory exists in remote
                     has_items = any(f.startswith(remote_dir) for f in remote_files)
                     if not has_items:
-                        try:
-                            shutil.rmtree(dir_path, ignore_errors=True)
-                        except Exception:
-                            pass
+                        shutil.rmtree(dir_path, ignore_errors=True)
 
         # Pre-scan to compute totals (files and bytes)
         total_files = 0
@@ -287,10 +284,8 @@ class S3Object:
                 if any(regex.search(local_file) for regex in exclude_regexes):
                     continue
                 total_files += 1
-                try:
+                with suppress(TypeError, ValueError):
                     total_bytes += int(file_obj.get("Size", 0))
-                except Exception:
-                    pass
 
         _logger.info(f"Download: {total_files} files, {total_bytes} bytes")
 
@@ -306,11 +301,8 @@ class S3Object:
         # Callback factory to avoid closure bug
         def make_callback(pbar: ProgressBar) -> Callable[[int], None]:
             def callback(n: int) -> None:
-                try:
+                with suppress(Exception):
                     pbar.update(n)
-                except Exception:
-                    # Progress bar failures should not interrupt transfers
-                    pass
 
             return callback
 
@@ -390,11 +382,8 @@ class S3Object:
             )
 
         # Close overall progress
-        try:
+        with suppress(Exception):
             overall_pbar.close()
-        except Exception:
-            # Progress bar close failures are non-critical
-            pass
 
     def upload(
         self,
@@ -541,10 +530,8 @@ class S3Object:
                 if any(regex.search(local_file) for regex in exclude_regexes):
                     continue
                 total_files += 1
-                try:
+                with suppress(OSError):
                     total_bytes += os.path.getsize(local_file)
-                except Exception:
-                    pass
 
         _logger.info(f"Upload: {total_files} files, {total_bytes} bytes")
 
@@ -560,11 +547,8 @@ class S3Object:
         # Callback factory to avoid closure bug
         def make_callback(pbar: ProgressBar) -> Callable[[int], None]:
             def callback(n: int) -> None:
-                try:
+                with suppress(Exception):
                     pbar.update(n)
-                except Exception:
-                    # Progress bar failures should not interrupt transfers
-                    pass
 
             return callback
 
@@ -620,11 +604,8 @@ class S3Object:
             raise first_exception
 
         # Close overall progress
-        try:
+        with suppress(Exception):
             overall_pbar.close()
-        except Exception:
-            # Progress bar close failures are non-critical
-            pass
 
     def _is_equal_file(
         self, remote_key: str, local_path: str, use_checksum: bool
@@ -652,7 +633,7 @@ class S3Object:
                 return True
 
             return bool(local_hash == remote_etag)
-        except Exception:
+        except (OSError, ClientError):
             return False
 
     @contextmanager

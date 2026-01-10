@@ -6,7 +6,7 @@ import asyncio
 import os
 import re
 import shutil
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, AsyncIterator, Callable, List, Optional, Tuple, Union
 
 from .async_client import AsyncS3Client
@@ -277,10 +277,8 @@ class AsyncS3Object:
                         if any(regex.search(local_file) for regex in exclude_regexes):
                             continue
                         total_files += 1
-                        try:
+                        with suppress(TypeError, ValueError):
                             total_bytes += int(file_obj.get("Size", 0))
-                        except Exception:
-                            pass
         else:
             # Use sync client in thread pool
             total_files, total_bytes = await asyncio.to_thread(
@@ -324,10 +322,8 @@ class AsyncS3Object:
             )
 
         # Close overall progress
-        try:
+        with suppress(Exception):
             overall_pbar.close()
-        except Exception:
-            pass
 
     def _cleanup_local_files(
         self, local_dir: str, remote_prefix: str, remote_files: set
@@ -339,10 +335,8 @@ class AsyncS3Object:
                 relative_path = os.path.relpath(file_path, local_dir).replace("\\", "/")
                 remote_key = f"{remote_prefix}{relative_path}"
                 if remote_key not in remote_files:
-                    try:
+                    with suppress(OSError):
                         os.remove(file_path)
-                    except Exception:
-                        pass
 
             for dir_name in dirs:
                 dir_path = os.path.join(root, dir_name)
@@ -350,10 +344,7 @@ class AsyncS3Object:
                 remote_dir = f"{remote_prefix}{relative_path}/"
                 has_items = any(f.startswith(remote_dir) for f in remote_files)
                 if not has_items:
-                    try:
-                        shutil.rmtree(dir_path, ignore_errors=True)
-                    except Exception:
-                        pass
+                    shutil.rmtree(dir_path, ignore_errors=True)
 
     def _count_files_sync(
         self,
@@ -379,10 +370,8 @@ class AsyncS3Object:
                 if any(regex.search(local_file) for regex in exclude_regexes):
                     continue
                 total_files += 1
-                try:
+                with suppress(TypeError, ValueError):
                     total_bytes += int(file_obj.get("Size", 0))
-                except Exception:
-                    pass
 
         return total_files, total_bytes
 
@@ -401,17 +390,16 @@ class AsyncS3Object:
         # Callback factory to avoid closure bug
         def make_callback(pbar: ProgressBar) -> Callable[[int], None]:
             def callback(n: int) -> None:
-                try:
+                with suppress(Exception):
                     pbar.update(n)
-                except Exception:
-                    # Progress bar failures should not interrupt transfers
-                    pass
 
             return callback
 
         overall_callback = make_callback(overall_pbar)
 
-        async with self._client.session.client(
+        session = self._client.session
+        assert session is not None
+        async with session.client(
             "s3", endpoint_url=getattr(self._client, "_endpoint_url", None)
         ) as s3:
             paginator = s3.get_paginator("list_objects_v2")
@@ -506,11 +494,8 @@ class AsyncS3Object:
         # Callback factory to avoid closure bug
         def make_callback(pbar: ProgressBar) -> Callable[[int], None]:
             def callback(n: int) -> None:
-                try:
+                with suppress(Exception):
                     pbar.update(n)
-                except Exception:
-                    # Progress bar failures should not interrupt transfers
-                    pass
 
             return callback
 
@@ -745,11 +730,8 @@ class AsyncS3Object:
         # Callback factory to avoid closure bug
         def make_callback(pbar: ProgressBar) -> Callable[[int], None]:
             def callback(n: int) -> None:
-                try:
+                with suppress(Exception):
                     pbar.update(n)
-                except Exception:
-                    # Progress bar failures should not interrupt transfers
-                    pass
 
             return callback
 
@@ -806,11 +788,8 @@ class AsyncS3Object:
             raise first_exception
 
         # Close overall progress
-        try:
+        with suppress(Exception):
             overall_pbar.close()
-        except Exception:
-            # Progress bar close failures are non-critical
-            pass
 
     def _count_local_files(
         self, local_dir: str, exclude_regexes: List[re.Pattern[str]]
@@ -824,10 +803,8 @@ class AsyncS3Object:
                 if any(regex.search(local_file) for regex in exclude_regexes):
                     continue
                 total_files += 1
-                try:
+                with suppress(OSError):
                     total_bytes += os.path.getsize(local_file)
-                except Exception:
-                    pass
         return total_files, total_bytes
 
     async def _is_equal_file(
@@ -859,7 +836,7 @@ class AsyncS3Object:
                 return True
 
             return bool(local_hash == remote_etag)
-        except Exception:
+        except (OSError, S3ObjectError, SyncError):
             return False
 
     @asynccontextmanager

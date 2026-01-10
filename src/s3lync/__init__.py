@@ -10,38 +10,26 @@ from .logging import configure_logging, get_logger
 from .progress import ProgressBar, chain_callbacks
 from .retry import RetryConfig, async_retry, retry
 
+__all__ = [
+    "S3Object",
+    "S3lyncError",
+    "HashMismatchError",
+    "SyncError",
+    "S3ObjectError",
+    "ProgressBar",
+    "chain_callbacks",
+    "configure_logging",
+    "get_logger",
+    "retry",
+    "async_retry",
+    "RetryConfig",
+]
+
 # Async support (optional - requires aioboto3)
 try:
-    from .async_core import AsyncS3Object
+    from .async_core import AsyncS3Object as _AsyncS3Object
 
-    __all__ = [
-        "S3Object",
-        "AsyncS3Object",
-        "S3lyncError",
-        "HashMismatchError",
-        "SyncError",
-        "S3ObjectError",
-        "ProgressBar",
-        "chain_callbacks",
-        "configure_logging",
-        "get_logger",
-        "retry",
-        "async_retry",
-        "RetryConfig",
-    ]
+    __all__.insert(1, "AsyncS3Object")
+    AsyncS3Object = _AsyncS3Object
 except ImportError:
-    # aioboto3 not installed - async support not available
-    __all__ = [
-        "S3Object",
-        "S3lyncError",
-        "HashMismatchError",
-        "SyncError",
-        "S3ObjectError",
-        "ProgressBar",
-        "chain_callbacks",
-        "configure_logging",
-        "get_logger",
-        "retry",
-        "async_retry",
-        "RetryConfig",
-    ]
+    pass

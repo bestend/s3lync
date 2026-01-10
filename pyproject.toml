@@ -51,6 +51,7 @@ dev = [
     "ruff>=0.0.250",
     "mypy>=1.0",
     "pytest-asyncio>=0.21.0",
+    "aioboto3>=12.0.0",
 ]
 
 [tool.setuptools]

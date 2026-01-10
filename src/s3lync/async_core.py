@@ -404,6 +404,7 @@ class AsyncS3Object:
                 try:
                     pbar.update(n)
                 except Exception:
+                    # Progress bar failures should not interrupt transfers
                     pass
 
             return callback
@@ -460,11 +461,16 @@ class AsyncS3Object:
                 for remote_key, local_file in files_to_download
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
+            first_exception: Optional[BaseException] = None
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
                     _logger.error(
                         f"Download failed for {files_to_download[i][0]}: {result}"
                     )
+                    if first_exception is None:
+                        first_exception = result
+            if first_exception is not None:
+                raise first_exception
 
             # Process subdirectories recursively
             for remote_subdir, local_subdir in subdirs_to_process:
@@ -549,11 +555,16 @@ class AsyncS3Object:
             for remote_key, local_file in files_to_download
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
+        first_exception: Optional[BaseException] = None
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 _logger.error(
                     f"Download failed for {files_to_download[i][0]}: {result}"
                 )
+                if first_exception is None:
+                    first_exception = result
+        if first_exception is not None:
+            raise first_exception
 
         # Process subdirectories
         for remote_subdir, local_subdir in subdirs_to_process:
@@ -722,6 +733,7 @@ class AsyncS3Object:
                 try:
                     pbar.update(n)
                 except Exception:
+                    # Progress bar failures should not interrupt transfers
                     pass
 
             return callback
@@ -762,14 +774,20 @@ class AsyncS3Object:
             for remote_key, local_file in files_to_upload
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
+        first_exception: Optional[BaseException] = None
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 _logger.error(f"Upload failed for {files_to_upload[i][1]}: {result}")
+                if first_exception is None:
+                    first_exception = result
+        if first_exception is not None:
+            raise first_exception
 
         # Close overall progress
         try:
             overall_pbar.close()
         except Exception:
+            # Progress bar close failures are non-critical
             pass
 
     def _count_local_files(

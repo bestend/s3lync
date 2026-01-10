@@ -443,8 +443,8 @@ configure_logging()
 # 상세 디버깅
 configure_logging(level=logging.DEBUG)
 
-# 파일에 로그 저장
-configure_logging(level=logging.DEBUG, log_file="s3lync.log")
+# 로깅 비활성화
+configure_logging(level=logging.CRITICAL)
 ```
 
 로거 계층:
@@ -458,12 +458,12 @@ configure_logging(level=logging.DEBUG, log_file="s3lync.log")
 일시적 AWS 오류는 지수 백오프로 자동 재시도됩니다:
 
 ```python
-from s3lync.retry import RetryConfig, retry
+from s3lync.retry import retry
 
-# 기본 설정: 3회 시도, 1초 지연, 2배 백오프
+# 기본 설정: 3회 시도, 0.5초 지연, 2배 백오프
 # 커스텀 설정으로 자신만의 함수 래핑 가능
 
-@retry(RetryConfig(max_attempts=5, base_delay=2.0))
+@retry(max_attempts=5, base_delay=2.0)
 def my_s3_operation():
     ...
 ```

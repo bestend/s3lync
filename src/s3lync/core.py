@@ -309,6 +309,7 @@ class S3Object:
                 try:
                     pbar.update(n)
                 except Exception:
+                    # Progress bar failures should not interrupt transfers
                     pass
 
             return callback
@@ -341,6 +342,7 @@ class S3Object:
 
         # Download files in parallel
         max_workers = min(8, len(files_to_download)) if files_to_download else 1
+        first_exception: Optional[Exception] = None
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
                 executor.submit(
@@ -360,6 +362,10 @@ class S3Object:
                 exc = future.exception()
                 if exc:
                     _logger.error(f"Download failed: {exc}")
+                    if first_exception is None:
+                        first_exception = exc
+        if first_exception is not None:
+            raise first_exception
 
         # Process subdirectories recursively
         for remote_subdir, local_subdir in subdirs_to_process:
@@ -376,6 +382,7 @@ class S3Object:
         try:
             overall_pbar.close()
         except Exception:
+            # Progress bar close failures are non-critical
             pass
 
     def upload(
@@ -545,6 +552,7 @@ class S3Object:
                 try:
                     pbar.update(n)
                 except Exception:
+                    # Progress bar failures should not interrupt transfers
                     pass
 
             return callback
@@ -566,6 +574,7 @@ class S3Object:
 
         # Upload files in parallel
         max_workers = min(8, len(files_to_upload)) if files_to_upload else 1
+        first_exception: Optional[Exception] = None
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [
                 executor.submit(
@@ -585,11 +594,16 @@ class S3Object:
                 exc = future.exception()
                 if exc:
                     _logger.error(f"Upload failed: {exc}")
+                    if first_exception is None:
+                        first_exception = exc
+        if first_exception is not None:
+            raise first_exception
 
         # Close overall progress
         try:
             overall_pbar.close()
         except Exception:
+            # Progress bar close failures are non-critical
             pass
 
     def _is_equal_file(

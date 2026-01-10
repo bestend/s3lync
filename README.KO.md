@@ -52,6 +52,9 @@ s3lync는 **개발자 경험(DX)**에 집중합니다.
 * ✅ **Hash 검증** — MD5 기반 무결성 검사
 * 💾 **스마트 캐싱** — 지능형 무효화를 포함한 로컬 캐시
 * 🔒 **강제 동기화 모드** — 로컬과 원격을 동일하게 만들기
+* ⚡ **병렬 전송** — 디렉토리 동기화 시 최대 8개 파일 동시 전송
+* 🔁 **자동 재시도** — 일시적 오류에 대한 지수 백오프 재시도
+* 📝 **구조화된 로깅** — 디버깅을 위한 계층적 로거
 
 ---
 
@@ -425,6 +428,51 @@ export AWS_PROFILE=my-profile
 ---
 
 ## 추가 기능
+
+### 로깅 설정
+
+디버깅을 위한 상세 로깅 활성화:
+
+```python
+from s3lync import configure_logging
+import logging
+
+# 기본 로깅 활성화 (INFO 레벨)
+configure_logging()
+
+# 상세 디버깅
+configure_logging(level=logging.DEBUG)
+
+# 파일에 로그 저장
+configure_logging(level=logging.DEBUG, log_file="s3lync.log")
+```
+
+로거 계층:
+- `s3lync` - 루트 로거
+- `s3lync.core` - 핵심 동기화 작업
+- `s3lync.async_core` - 비동기 작업
+- `s3lync.client` - boto3 클라이언트 작업
+
+### 자동 재시도
+
+일시적 AWS 오류는 지수 백오프로 자동 재시도됩니다:
+
+```python
+from s3lync.retry import RetryConfig, retry
+
+# 기본 설정: 3회 시도, 1초 지연, 2배 백오프
+# 커스텀 설정으로 자신만의 함수 래핑 가능
+
+@retry(RetryConfig(max_attempts=5, base_delay=2.0))
+def my_s3_operation():
+    ...
+```
+
+재시도 가능한 오류:
+- `ThrottlingException` - API 속도 제한
+- `ServiceUnavailable` - 일시적 서비스 장애
+- `SlowDown` - S3 요청 속도 제한
+- `RequestTimeout` - 네트워크 타임아웃
 
 ### Custom Callbacks
 

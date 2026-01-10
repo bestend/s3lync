@@ -13,7 +13,11 @@ except ImportError as e:
     ) from e
 
 from .exceptions import S3lyncError
+from .logging import get_logger
 from .progress import chain_callbacks, create_progress_callback
+from .retry import async_retry
+
+_logger = get_logger("async_client")
 
 
 class AsyncS3Client:
@@ -39,7 +43,9 @@ class AsyncS3Client:
             # Use the provided aioboto3 session
             self.session = session
             self._external_client = None
-            self._endpoint_url = endpoint_url  # Store endpoint even for external session
+            self._endpoint_url = (
+                endpoint_url  # Store endpoint even for external session
+            )
         elif client is not None:
             # Sync client provided - we'll use it with asyncio.to_thread
             self.session = None
@@ -53,6 +59,7 @@ class AsyncS3Client:
 
         self.transfer_config = None  # Use aioboto3 defaults
 
+    @async_retry(max_attempts=3, base_delay=0.5, max_delay=30.0)
     async def download_file(
         self,
         bucket: str,
@@ -163,6 +170,7 @@ class AsyncS3Client:
             transfer_config,
         )
 
+    @async_retry(max_attempts=3, base_delay=0.5, max_delay=30.0)
     async def upload_file(
         self,
         bucket: str,
@@ -294,9 +302,7 @@ class AsyncS3Client:
         if self._external_client:
             import asyncio
 
-            return await asyncio.to_thread(
-                self._sync_get_object_metadata, bucket, key
-            )
+            return await asyncio.to_thread(self._sync_get_object_metadata, bucket, key)
 
         try:
             async with self.session.client(
@@ -600,4 +606,3 @@ class AsyncS3Client:
 
         sync_client = S3Client(client=self._external_client)
         return sync_client.delete_object(bucket, key)
-

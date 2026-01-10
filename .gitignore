@@ -56,4 +56,4 @@ dmypy.json
 *.log
 .env
 .env.local
-
+/main.py

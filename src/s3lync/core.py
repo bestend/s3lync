@@ -5,10 +5,14 @@ Core S3Object class for s3lync.
 import os
 import re
 import shutil
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from typing import Any, Callable, Iterator, List, Optional, Union
+from typing import Any, Callable, Iterator, List, Optional, Tuple, Union
 
 from .client import S3Client
+from .logging import get_logger
+
+_logger = get_logger("core")
 from .exceptions import HashMismatchError, S3ObjectError, SyncError
 from .hash import calculate_file_hash
 from .progress import ProgressBar
@@ -288,8 +292,7 @@ class S3Object:
                 except Exception:
                     pass
 
-        # Print initial summary
-        print(f"Total: {total_files} files, {total_bytes} bytes")
+        _logger.info(f"Download: {total_files} files, {total_bytes} bytes")
 
         # Overall progress bar (bytes-based)
         overall_pbar = ProgressBar(
@@ -300,55 +303,74 @@ class S3Object:
             leave=True,
         )
 
-        # Download files and subdirectories (hierarchical walk)
+        # Callback factory to avoid closure bug
+        def make_callback(pbar: ProgressBar) -> Callable[[int], None]:
+            def callback(n: int) -> None:
+                try:
+                    pbar.update(n)
+                except Exception:
+                    pass
+
+            return callback
+
+        overall_callback = make_callback(overall_pbar)
+
+        # Collect all files to download
+        files_to_download: List[Tuple[str, str]] = []
+        subdirs_to_process: List[Tuple[str, str]] = []
+
         paginator = self._client.client.get_paginator("list_objects_v2")
         for result in paginator.paginate(
             Bucket=self.bucket, Prefix=remote_prefix, Delimiter="/"
         ):
-            # Process files
             for file_obj in result.get("Contents", []):
                 remote_key = file_obj["Key"]
                 if remote_key == remote_prefix:
                     continue
-
                 relative_path = os.path.relpath(remote_key, remote_prefix)
                 local_file = os.path.join(local_dir, relative_path)
-
-                # Check exclude pattern
                 if any(regex.search(local_file) for regex in exclude_regexes):
                     continue
+                files_to_download.append((remote_key, local_file))
 
-                # Create callback for overall progress
-                def overall_callback(n: int) -> None:
-                    try:
-                        overall_pbar.update(n)
-                    except Exception:
-                        pass
-
-                self._download_file(
-                    remote_key,
-                    local_file,
-                    use_checksum,
-                    mirror,
-                    callback=overall_callback,
-                    progress_mode=actual_progress_mode,
-                    progress_position=1,
-                    progress_leave=False,
-                )
-
-            # Process subdirectories
             for prefix_obj in result.get("CommonPrefixes", []):
                 remote_subdir = prefix_obj["Prefix"]
                 relative_path = os.path.relpath(remote_subdir, remote_prefix)
                 local_subdir = os.path.join(local_dir, relative_path)
-                self._download_dir(
-                    remote_subdir,
-                    local_subdir,
+                subdirs_to_process.append((remote_subdir, local_subdir))
+
+        # Download files in parallel
+        max_workers = min(8, len(files_to_download)) if files_to_download else 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(
+                    self._download_file,
+                    remote_key,
+                    local_file,
                     use_checksum,
                     mirror,
-                    excludes,
-                    progress_mode,
+                    overall_callback,
+                    actual_progress_mode,
+                    1,
+                    False,
                 )
+                for remote_key, local_file in files_to_download
+            ]
+            for future in as_completed(futures):
+                exc = future.exception()
+                if exc:
+                    _logger.error(f"Download failed: {exc}")
+
+        # Process subdirectories recursively
+        for remote_subdir, local_subdir in subdirs_to_process:
+            self._download_dir(
+                remote_subdir,
+                local_subdir,
+                use_checksum,
+                mirror,
+                excludes,
+                progress_mode,
+            )
 
         # Close overall progress
         try:
@@ -506,8 +528,7 @@ class S3Object:
                 except Exception:
                     pass
 
-        # Print initial summary
-        print(f"Total: {total_files} files, {total_bytes} bytes")
+        _logger.info(f"Upload: {total_files} files, {total_bytes} bytes")
 
         # Overall progress bar (bytes-based)
         overall_pbar = ProgressBar(
@@ -518,37 +539,52 @@ class S3Object:
             leave=True,
         )
 
-        # Upload files
+        # Callback factory to avoid closure bug
+        def make_callback(pbar: ProgressBar) -> Callable[[int], None]:
+            def callback(n: int) -> None:
+                try:
+                    pbar.update(n)
+                except Exception:
+                    pass
+
+            return callback
+
+        overall_callback = make_callback(overall_pbar)
+
+        # Collect files to upload
+        files_to_upload: List[Tuple[str, str]] = []
         for root, _dirs, files in os.walk(local_dir):
             for file in files:
                 local_file = os.path.join(root, file)
+                if any(regex.search(local_file) for regex in exclude_regexes):
+                    continue
                 relative_path = os.path.relpath(local_file, local_dir).replace(
                     "\\", "/"
                 )
-
-                # Check exclude pattern
-                if any(regex.search(local_file) for regex in exclude_regexes):
-                    continue
-
                 remote_key = f"{remote_prefix}{relative_path}"
+                files_to_upload.append((remote_key, local_file))
 
-                # Create callback for overall progress
-                def overall_callback(n: int) -> None:
-                    try:
-                        overall_pbar.update(n)
-                    except Exception:
-                        pass
-
-                self._upload_file(
+        # Upload files in parallel
+        max_workers = min(8, len(files_to_upload)) if files_to_upload else 1
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(
+                    self._upload_file,
                     remote_key,
                     local_file,
                     use_checksum,
                     mirror,
-                    callback=overall_callback,
-                    progress_mode=actual_progress_mode,
-                    progress_position=1,
-                    progress_leave=False,
+                    overall_callback,
+                    actual_progress_mode,
+                    1,
+                    False,
                 )
+                for remote_key, local_file in files_to_upload
+            ]
+            for future in as_completed(futures):
+                exc = future.exception()
+                if exc:
+                    _logger.error(f"Upload failed: {exc}")
 
         # Close overall progress
         try:
@@ -636,7 +672,6 @@ class S3Object:
     def delete(self) -> bool:
         """Delete S3 object (file or directory)."""
         return self._client.delete_object(self.bucket, self.key)
-
 
     def add_exclude(self, pattern: str) -> "S3Object":
         """

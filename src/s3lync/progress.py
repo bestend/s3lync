@@ -161,8 +161,6 @@ def create_progress_callback(
 
     return pbar, callback
 
-    return pbar, callback
-
 
 def _format_bytes(num: int) -> str:
     """Format bytes to human-readable string using binary multiples (KiB, MiB, ...)."""

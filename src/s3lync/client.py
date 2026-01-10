@@ -12,7 +12,11 @@ except ImportError as e:
     raise ImportError("boto3 is required. Install it with: pip install boto3") from e
 
 from .exceptions import S3lyncError
+from .logging import get_logger
 from .progress import chain_callbacks, create_progress_callback
+from .retry import retry
+
+_logger = get_logger("client")
 
 
 class S3Client:
@@ -55,6 +59,7 @@ class S3Client:
         """
         return None  # Use boto3 defaults
 
+    @retry(max_attempts=3, base_delay=0.5, max_delay=30.0)
     def download_file(
         self,
         bucket: str,
@@ -122,6 +127,7 @@ class S3Client:
         except Exception as e:
             raise S3lyncError(f"Failed to download {bucket}/{key}: {str(e)}") from e
 
+    @retry(max_attempts=3, base_delay=0.5, max_delay=30.0)
     def upload_file(
         self,
         bucket: str,

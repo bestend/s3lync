@@ -30,7 +30,6 @@ dependencies = [
     "boto3-stubs~=1.42.14",
     "botocore>=1.29.0",
     "tqdm>=4.60.0",
-    "aioboto3>=12.0.0",
 ]
 
 [project.urls]
@@ -96,3 +95,5 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --strict-markers"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

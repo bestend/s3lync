@@ -43,6 +43,7 @@ venv.bak/
 # Testing
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 .tox/
 .hypothesis/
@@ -56,4 +57,4 @@ dmypy.json
 *.log
 .env
 .env.local
-
+/main.py

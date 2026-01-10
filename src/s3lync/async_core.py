@@ -7,13 +7,16 @@ import os
 import re
 import shutil
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Callable, List, Optional, Union
+from typing import Any, AsyncIterator, Callable, List, Optional, Tuple, Union
 
 from .async_client import AsyncS3Client
 from .exceptions import HashMismatchError, S3ObjectError, SyncError
 from .hash import calculate_file_hash
+from .logging import get_logger
 from .progress import ProgressBar
 from .utils import ensure_parent_dir, get_cache_dir, normalize_path, parse_s3_uri
+
+_logger = get_logger("async_core")
 
 
 class AsyncS3Object:
@@ -83,7 +86,9 @@ class AsyncS3Object:
 
         # Initialize AsyncS3Client
         if aioboto3_session is not None:
-            self._client = AsyncS3Client(session=aioboto3_session, endpoint_url=self._endpoint)
+            self._client = AsyncS3Client(
+                session=aioboto3_session, endpoint_url=self._endpoint
+            )
         elif boto3_client is not None:
             # Use sync client with thread pool
             self._client = AsyncS3Client(client=boto3_client)
@@ -180,7 +185,9 @@ class AsyncS3Object:
         ensure_parent_dir(local_path)
 
         # Check if file exists and is up-to-date
-        if not mirror and await self._is_equal_file(remote_key, local_path, use_checksum):
+        if not mirror and await self._is_equal_file(
+            remote_key, local_path, use_checksum
+        ):
             return
 
         # Download file
@@ -238,7 +245,9 @@ class AsyncS3Object:
         # Handle mirror - delete local files not in remote
         if mirror and os.path.exists(local_dir):
             remote_files = set(
-                await self._client.list_files(self.bucket, remote_prefix, recursive=True)
+                await self._client.list_files(
+                    self.bucket, remote_prefix, recursive=True
+                )
             )
 
             # Delete local files/dirs not in remote (run in thread pool)
@@ -281,7 +290,7 @@ class AsyncS3Object:
                 exclude_regexes,
             )
 
-        print(f"Total: {total_files} files, {total_bytes} bytes")
+        _logger.info(f"Download: {total_files} files, {total_bytes} bytes")
 
         # Overall progress bar
         overall_pbar = ProgressBar(
@@ -387,34 +396,61 @@ class AsyncS3Object:
         progress_mode: str,
         overall_pbar: ProgressBar,
     ) -> None:
-        """Download directory using async client."""
+        """Download directory using async client with parallel downloads."""
+
+        # Callback factory to avoid closure bug
+        def make_callback(pbar: ProgressBar) -> Callable[[int], None]:
+            def callback(n: int) -> None:
+                try:
+                    pbar.update(n)
+                except Exception:
+                    # Progress bar failures should not interrupt transfers
+                    pass
+
+            return callback
+
+        overall_callback = make_callback(overall_pbar)
+
         async with self._client.session.client(
             "s3", endpoint_url=getattr(self._client, "_endpoint_url", None)
         ) as s3:
             paginator = s3.get_paginator("list_objects_v2")
 
+            # Collect files and subdirs first
+            files_to_download: List[Tuple[str, str]] = []
+            subdirs_to_process: List[Tuple[str, str]] = []
+
             async for result in paginator.paginate(
                 Bucket=self.bucket, Prefix=remote_prefix, Delimiter="/"
             ):
-                # Process files
                 for file_obj in result.get("Contents", []):
                     remote_key = file_obj["Key"]
                     if remote_key == remote_prefix:
                         continue
-
                     relative_path = os.path.relpath(remote_key, remote_prefix)
                     local_file = os.path.join(local_dir, relative_path)
-
-                    # Check exclude pattern
                     if any(regex.search(local_file) for regex in exclude_regexes):
                         continue
+                    files_to_download.append((remote_key, local_file))
 
-                    def overall_callback(n: int) -> None:
-                        try:
-                            overall_pbar.update(n)
-                        except Exception:
-                            pass
+                for prefix_obj in result.get("CommonPrefixes", []):
+                    remote_subdir = prefix_obj["Prefix"]
+                    relative_path = os.path.relpath(remote_subdir, remote_prefix)
+                    local_subdir = os.path.join(local_dir, relative_path)
+                    subdirs_to_process.append((remote_subdir, local_subdir))
 
+            # Download files in parallel using asyncio.gather with semaphore
+            env_max_workers = os.getenv("S3LYNC_MAX_WORKERS")
+            try:
+                max_concurrency = int(env_max_workers) if env_max_workers else 8
+            except ValueError:
+                max_concurrency = 8
+            if max_concurrency < 1:
+                max_concurrency = 1
+            sem = asyncio.Semaphore(max_concurrency)  # Limit concurrent downloads
+
+            async def download_with_sem(remote_key: str, local_file: str) -> None:
+                async with sem:
                     await self._download_file(
                         remote_key,
                         local_file,
@@ -426,19 +462,33 @@ class AsyncS3Object:
                         progress_leave=False,
                     )
 
-                # Process subdirectories recursively
-                for prefix_obj in result.get("CommonPrefixes", []):
-                    remote_subdir = prefix_obj["Prefix"]
-                    relative_path = os.path.relpath(remote_subdir, remote_prefix)
-                    local_subdir = os.path.join(local_dir, relative_path)
-                    await self._download_dir(
-                        remote_subdir,
-                        local_subdir,
-                        use_checksum,
-                        mirror,
-                        exclude_regexes,
-                        progress_mode,
+            # Execute downloads in parallel
+            tasks = [
+                download_with_sem(remote_key, local_file)
+                for remote_key, local_file in files_to_download
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            first_exception: Optional[BaseException] = None
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    _logger.error(
+                        f"Download failed for {files_to_download[i][0]}: {result}"
                     )
+                    if first_exception is None:
+                        first_exception = result
+            if first_exception is not None:
+                raise first_exception
+
+            # Process subdirectories recursively
+            for remote_subdir, local_subdir in subdirs_to_process:
+                await self._download_dir(
+                    remote_subdir,
+                    local_subdir,
+                    use_checksum,
+                    mirror,
+                    exclude_regexes,
+                    progress_mode,
+                )
 
     async def _download_dir_sync(
         self,
@@ -450,11 +500,28 @@ class AsyncS3Object:
         progress_mode: str,
         overall_pbar: ProgressBar,
     ) -> None:
-        """Download directory using sync client in thread pool."""
+        """Download directory using sync client in thread pool with parallel downloads."""
         from .client import S3Client
+
+        # Callback factory to avoid closure bug
+        def make_callback(pbar: ProgressBar) -> Callable[[int], None]:
+            def callback(n: int) -> None:
+                try:
+                    pbar.update(n)
+                except Exception:
+                    # Progress bar failures should not interrupt transfers
+                    pass
+
+            return callback
+
+        overall_callback = make_callback(overall_pbar)
 
         sync_client = S3Client(client=self._client._external_client)
         paginator = sync_client.client.get_paginator("list_objects_v2")
+
+        # Collect files and subdirs first
+        files_to_download: List[Tuple[str, str]] = []
+        subdirs_to_process: List[Tuple[str, str]] = []
 
         for result in paginator.paginate(
             Bucket=self.bucket, Prefix=remote_prefix, Delimiter="/"
@@ -463,19 +530,30 @@ class AsyncS3Object:
                 remote_key = file_obj["Key"]
                 if remote_key == remote_prefix:
                     continue
-
                 relative_path = os.path.relpath(remote_key, remote_prefix)
                 local_file = os.path.join(local_dir, relative_path)
-
                 if any(regex.search(local_file) for regex in exclude_regexes):
                     continue
+                files_to_download.append((remote_key, local_file))
 
-                def overall_callback(n: int) -> None:
-                    try:
-                        overall_pbar.update(n)
-                    except Exception:
-                        pass
+            for prefix_obj in result.get("CommonPrefixes", []):
+                remote_subdir = prefix_obj["Prefix"]
+                relative_path = os.path.relpath(remote_subdir, remote_prefix)
+                local_subdir = os.path.join(local_dir, relative_path)
+                subdirs_to_process.append((remote_subdir, local_subdir))
 
+        # Download files in parallel using asyncio.gather with semaphore
+        env_max_workers = os.getenv("S3LYNC_MAX_WORKERS")
+        try:
+            max_concurrency = int(env_max_workers) if env_max_workers else 8
+        except ValueError:
+            max_concurrency = 8
+        if max_concurrency < 1:
+            max_concurrency = 1
+        sem = asyncio.Semaphore(max_concurrency)
+
+        async def download_with_sem(remote_key: str, local_file: str) -> None:
+            async with sem:
                 await self._download_file(
                     remote_key,
                     local_file,
@@ -487,18 +565,32 @@ class AsyncS3Object:
                     progress_leave=False,
                 )
 
-            for prefix_obj in result.get("CommonPrefixes", []):
-                remote_subdir = prefix_obj["Prefix"]
-                relative_path = os.path.relpath(remote_subdir, remote_prefix)
-                local_subdir = os.path.join(local_dir, relative_path)
-                await self._download_dir(
-                    remote_subdir,
-                    local_subdir,
-                    use_checksum,
-                    mirror,
-                    exclude_regexes,
-                    progress_mode,
+        tasks = [
+            download_with_sem(remote_key, local_file)
+            for remote_key, local_file in files_to_download
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        first_exception: Optional[BaseException] = None
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                _logger.error(
+                    f"Download failed for {files_to_download[i][0]}: {result}"
                 )
+                if first_exception is None:
+                    first_exception = result
+        if first_exception is not None:
+            raise first_exception
+
+        # Process subdirectories
+        for remote_subdir, local_subdir in subdirs_to_process:
+            await self._download_dir(
+                remote_subdir,
+                local_subdir,
+                use_checksum,
+                mirror,
+                exclude_regexes,
+                progress_mode,
+            )
 
     async def upload(
         self,
@@ -579,7 +671,9 @@ class AsyncS3Object:
     ) -> None:
         """Upload single file to S3 asynchronously."""
         # Check if file exists and is up-to-date
-        if not mirror and await self._is_equal_file(remote_key, local_path, use_checksum):
+        if not mirror and await self._is_equal_file(
+            remote_key, local_path, use_checksum
+        ):
             return
 
         # Upload file
@@ -637,7 +731,7 @@ class AsyncS3Object:
             self._count_local_files, local_dir, exclude_regexes
         )
 
-        print(f"Total: {total_files} files, {total_bytes} bytes")
+        _logger.info(f"Upload: {total_files} files, {total_bytes} bytes")
 
         # Overall progress bar
         overall_pbar = ProgressBar(
@@ -648,24 +742,44 @@ class AsyncS3Object:
             leave=True,
         )
 
-        # Upload files
+        # Callback factory to avoid closure bug
+        def make_callback(pbar: ProgressBar) -> Callable[[int], None]:
+            def callback(n: int) -> None:
+                try:
+                    pbar.update(n)
+                except Exception:
+                    # Progress bar failures should not interrupt transfers
+                    pass
+
+            return callback
+
+        overall_callback = make_callback(overall_pbar)
+
+        # Collect files to upload
+        files_to_upload: List[Tuple[str, str]] = []
         for root, _dirs, files in os.walk(local_dir):
             for file in files:
                 local_file = os.path.join(root, file)
-                relative_path = os.path.relpath(local_file, local_dir).replace("\\", "/")
-
-                # Check exclude pattern
                 if any(regex.search(local_file) for regex in exclude_regexes):
                     continue
-
+                relative_path = os.path.relpath(local_file, local_dir).replace(
+                    "\\", "/"
+                )
                 remote_key = f"{remote_prefix}{relative_path}"
+                files_to_upload.append((remote_key, local_file))
 
-                def overall_callback(n: int) -> None:
-                    try:
-                        overall_pbar.update(n)
-                    except Exception:
-                        pass
+        # Upload files in parallel using asyncio.gather with semaphore
+        env_max_workers = os.getenv("S3LYNC_MAX_WORKERS")
+        try:
+            max_concurrency = int(env_max_workers) if env_max_workers else 8
+        except ValueError:
+            max_concurrency = 8
+        if max_concurrency < 1:
+            max_concurrency = 1
+        sem = asyncio.Semaphore(max_concurrency)
 
+        async def upload_with_sem(remote_key: str, local_file: str) -> None:
+            async with sem:
                 await self._upload_file(
                     remote_key,
                     local_file,
@@ -677,10 +791,25 @@ class AsyncS3Object:
                     progress_leave=False,
                 )
 
+        tasks = [
+            upload_with_sem(remote_key, local_file)
+            for remote_key, local_file in files_to_upload
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        first_exception: Optional[BaseException] = None
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                _logger.error(f"Upload failed for {files_to_upload[i][1]}: {result}")
+                if first_exception is None:
+                    first_exception = result
+        if first_exception is not None:
+            raise first_exception
+
         # Close overall progress
         try:
             overall_pbar.close()
         except Exception:
+            # Progress bar close failures are non-critical
             pass
 
     def _count_local_files(
@@ -829,4 +958,3 @@ class AsyncS3Object:
     def __str__(self) -> str:
         """String representation of AsyncS3Object."""
         return self.s3_uri
-

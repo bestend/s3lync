@@ -52,6 +52,9 @@ s3lync focuses on **developer experience**.
 * ✅ **Hash Verification** — MD5-based integrity checks
 * 💾 **Smart Caching** — Local cache with intelligent invalidation
 * 🔒 **Force Sync Mode** — Make local and remote identical
+* ⚡ **Parallel Transfers** — Up to 8x faster directory sync
+* 🔁 **Auto Retry** — Exponential backoff for transient failures
+* 📝 **Structured Logging** — Configurable logging system
 
 ---
 
@@ -425,6 +428,55 @@ export AWS_PROFILE=my-profile
 ---
 
 ## Additional Features
+
+### Logging Configuration
+
+Configure structured logging for debugging and monitoring:
+
+```python
+from s3lync import configure_logging, get_logger
+import logging
+
+# Enable debug logging
+configure_logging(level=logging.DEBUG)
+
+# Or get a logger for custom use
+logger = get_logger("my_app")
+logger.info("Starting sync operation")
+
+# Disable logging output
+configure_logging(level=logging.CRITICAL)
+```
+
+### Automatic Retry
+
+s3lync automatically retries on transient AWS errors with exponential backoff:
+
+- `ThrottlingException`
+- `ServiceUnavailable`  
+- `SlowDown`
+- `RequestTimeout`
+- Connection errors
+
+Default: 3 attempts with 0.5s base delay (max 30s).
+
+You can also use retry decorators in your own code:
+
+```python
+from s3lync import retry, async_retry, RetryConfig
+
+# Sync function with retry
+@retry(max_attempts=5, base_delay=1.0)
+def my_operation():
+    # Your code here
+    pass
+
+# Async function with retry
+@async_retry(max_attempts=3)
+async def my_async_operation():
+    # Your async code here
+    pass
+```
 
 ### Custom Callbacks
 
